@@ -1,0 +1,1130 @@
+// Cura_Sera — Home Health Care Agency Operating System (HHCOS)
+// ----------------------------------------------------------------------------
+// Multi-tenant schema. The TENANT is the Agency: every domain row carries
+// `agencyId` with an index and cascades from Agency. An optional platform layer
+// (AgencyNetwork) groups agencies for the SaaS owner (Phase 20/35).
+//
+// DB: SQLite for local dev (zero external deps). Production target per
+// APP_BLUEPRINT is PostgreSQL — switch `provider` to "postgresql" and the
+// String status fields can become native enums. Status fields use String +
+// Zod enums (src/lib/validation.ts) + TS unions (src/lib/enums.ts) so the model
+// is portable today.
+// ----------------------------------------------------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PLATFORM / TENANCY (Phase 20, 35)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AgencyNetwork {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  agencies  Agency[]
+}
+
+model Agency {
+  id        String         @id @default(cuid())
+  name      String
+  legalName String?
+  npi       String? // National Provider Identifier
+  email     String?
+  phone     String?
+  addressLine String?
+  city      String?
+  state     String         @default("FL")
+  zip       String?
+  timezone  String         @default("America/New_York")
+  active    Boolean        @default(true)
+  network   AgencyNetwork? @relation(fields: [networkId], references: [id], onDelete: SetNull)
+  networkId String?
+
+  // Subscription / billing (Phase 21)
+  plan                 String   @default("STARTER") // STARTER|PROFESSIONAL|GROWTH|ENTERPRISE
+  subscriptionStatus   String   @default("trialing") // trialing|active|past_due|canceled
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  trialEndsAt          DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations (back-refs)
+  users                User[]
+  branches             Branch[]
+  departments          Department[]
+  patients             Patient[]
+  caregivers           Caregiver[]
+  visits               Visit[]
+  carePlans            CarePlan[]
+  visitNotes           VisitNote[]
+  assessments          Assessment[]
+  incidentReports      IncidentReport[]
+  complianceItems      ComplianceItem[]
+  documents            Document[]
+  conversations        Conversation[]
+  messages             Message[]
+  announcements        Announcement[]
+  invoices             Invoice[]
+  payments             Payment[]
+  claims               Claim[]
+  payrollEntries       PayrollEntry[]
+  applicants           Applicant[]
+  evaluations          Evaluation[]
+  referralSources      ReferralSource[]
+  referrals            Referral[]
+  serviceAuths         ServiceAuthorization[]
+  medicaidWaivers      MedicaidWaiver[]
+  qualityReviews       QualityReview[]
+  satisfactionSurveys  SatisfactionSurvey[]
+  emergencyEvents      EmergencyEvent[]
+  performanceRecords   PerformanceRecord[]
+  auditLogs            AuditLog[]
+  securityEvents       SecurityEvent[]
+  apiKeys              ApiKey[]
+  aiInsights           AiInsight[]
+
+  @@index([networkId])
+}
+
+model Branch {
+  id          String       @id @default(cuid())
+  agency      Agency       @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId    String
+  name        String
+  addressLine String?
+  city        String?
+  state       String?
+  zip         String?
+  phone       String?
+  active      Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  departments Department[]
+  users       User[]
+  patients    Patient[]
+  caregivers  Caregiver[]
+
+  @@index([agencyId])
+}
+
+model Department {
+  id        String   @id @default(cuid())
+  agency    Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId  String
+  branch    Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  branchId  String?
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([agencyId])
+  @@index([branchId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IDENTITY / AUTH (Phase 2, 22)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  agency       Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId     String
+  branch       Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  branchId     String?
+  email        String
+  name         String
+  passwordHash String
+  // AGENCY_OWNER|AGENCY_ADMIN|CLINICAL_DIRECTOR|NURSE_SUPERVISOR|SCHEDULER|
+  // RN|LPN|CAREGIVER|HHA|BILLING|HR|COMPLIANCE|AUDITOR|PATIENT|FAMILY|PLATFORM_OWNER
+  role         String   @default("CAREGIVER")
+  active       Boolean  @default(true)
+  // Bumping tokenVersion invalidates all existing JWTs (force logout / ban).
+  tokenVersion Int      @default(0)
+  // 2FA (Phase 22)
+  twoFactorEnabled Boolean @default(false)
+  twoFactorSecret  String?
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Optional links: a User can BE a caregiver (mobile app) or a patient/family member
+  caregiver       Caregiver?
+  patientLink     Patient?       @relation("PatientUser")
+  familyOfPatient Patient?       @relation("FamilyUser", fields: [familyPatientId], references: [id], onDelete: SetNull)
+  familyPatientId String?
+
+  sessions        UserSession[]
+  sentMessages    Message[]
+  auditLogs       AuditLog[]
+
+  @@unique([agencyId, email])
+  @@index([agencyId])
+  @@index([branchId])
+  @@index([familyPatientId])
+}
+
+model UserSession {
+  id           String   @id @default(cuid())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId       String
+  device       String?
+  ip           String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+  lastSeenAt   DateTime @default(now())
+  revokedAt    DateTime?
+
+  @@index([userId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 1 — PATIENT MANAGEMENT
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Patient {
+  id         String   @id @default(cuid())
+  agency     Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId   String
+  branch     Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  branchId   String?
+  mrn        String? // medical record number
+  firstName  String
+  lastName   String
+  dob        DateTime?
+  gender     String?
+  phone      String?
+  email      String?
+  addressLine String?
+  city       String?
+  state      String?
+  zip        String?
+  // ACTIVE|PENDING|ON_HOLD|DISCHARGED|DECEASED
+  status     String   @default("ACTIVE")
+  admittedAt DateTime?
+  dischargedAt DateTime?
+  notes      String?
+
+  // Portal access
+  user       User?    @relation("PatientUser", fields: [userId], references: [id], onDelete: SetNull)
+  userId     String?  @unique
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  emergencyContacts EmergencyContact[]
+  insurancePolicies InsurancePolicy[]
+  diagnoses         Diagnosis[]
+  allergies         Allergy[]
+  medications       Medication[]
+  physicians        Physician[]
+  carePlans         CarePlan[]
+  visits            Visit[]
+  visitNotes        VisitNote[]
+  assessments       Assessment[]
+  incidentReports   IncidentReport[]
+  serviceAuths      ServiceAuthorization[]
+  medicaidWaivers   MedicaidWaiver[]
+  invoices          Invoice[]
+  documents         Document[]
+  emergencyPlan     EmergencyPlan?
+  referral          Referral?
+  satisfactionSurveys SatisfactionSurvey[]
+  familyMembers     User[]   @relation("FamilyUser")
+
+  @@index([agencyId])
+  @@index([branchId])
+  @@index([status])
+}
+
+model EmergencyContact {
+  id           String  @id @default(cuid())
+  patient      Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId    String
+  name         String
+  relationship String?
+  phone        String?
+  email        String?
+  isPrimary    Boolean @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([patientId])
+}
+
+model InsurancePolicy {
+  id          String  @id @default(cuid())
+  patient     Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId   String
+  payerName   String
+  payerType   String  @default("PRIVATE") // MEDICARE|MEDICAID|COMMERCIAL|PRIVATE|WAIVER
+  memberId    String?
+  groupNumber String?
+  isPrimary   Boolean @default(true)
+  effectiveDate DateTime?
+  expiryDate    DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([patientId])
+}
+
+model Diagnosis {
+  id          String  @id @default(cuid())
+  patient     Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId   String
+  code        String? // ICD-10
+  description String
+  isPrimary   Boolean @default(false)
+  diagnosedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([patientId])
+}
+
+model Allergy {
+  id        String  @id @default(cuid())
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId String
+  allergen  String
+  reaction  String?
+  severity  String? // MILD|MODERATE|SEVERE
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([patientId])
+}
+
+model Medication {
+  id         String  @id @default(cuid())
+  patient    Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId  String
+  name       String
+  dosage     String?
+  frequency  String?
+  route      String?
+  prescriber String?
+  active     Boolean @default(true)
+  startDate  DateTime?
+  endDate    DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([patientId])
+}
+
+model Physician {
+  id        String  @id @default(cuid())
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId String
+  name      String
+  npi       String?
+  specialty String?
+  phone     String?
+  fax       String?
+  isPrimary Boolean @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([patientId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 1/2 — CAREGIVER MANAGEMENT
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Caregiver {
+  id          String   @id @default(cuid())
+  agency      Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId    String
+  branch      Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  branchId    String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId      String?  @unique
+  firstName   String
+  lastName    String
+  email       String?
+  phone       String?
+  addressLine String?
+  city        String?
+  state       String?
+  zip         String?
+  // RN|LPN|CNA|HHA|COMPANION|THERAPIST
+  discipline  String   @default("HHA")
+  // ACTIVE|INACTIVE|ON_LEAVE|TERMINATED|ONBOARDING
+  status      String   @default("ACTIVE")
+  hireDate    DateTime?
+  hourlyRate  Float?
+  languages   String? // comma-separated, used by language matching
+  maxHoursPerWeek Int?
+  latitude    Float?
+  longitude   Float?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  certifications     Certification[]
+  backgroundChecks   BackgroundCheck[]
+  skills             CaregiverSkill[]
+  availabilities     Availability[]
+  visits             Visit[]
+  performanceRecords PerformanceRecord[]
+  complianceItems    ComplianceItem[]
+  documents          Document[]
+  payrollEntries     PayrollEntry[]
+
+  @@index([agencyId])
+  @@index([branchId])
+  @@index([status])
+}
+
+model Certification {
+  id           String    @id @default(cuid())
+  caregiver    Caregiver @relation(fields: [caregiverId], references: [id], onDelete: Cascade)
+  caregiverId  String
+  type         String // LICENSE|CPR|CNA|HHA|CEU|TB|DRIVERS_LICENSE|AUTO_INSURANCE
+  name         String
+  number       String?
+  issuedAt     DateTime?
+  expiresAt    DateTime?
+  // VALID|EXPIRING|EXPIRED|MISSING
+  status       String    @default("VALID")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([caregiverId])
+  @@index([expiresAt])
+}
+
+model BackgroundCheck {
+  id          String    @id @default(cuid())
+  caregiver   Caregiver @relation(fields: [caregiverId], references: [id], onDelete: Cascade)
+  caregiverId String
+  type        String // LEVEL_2|DRUG_TEST|EMPLOYMENT_VERIFICATION|REFERENCE
+  // PENDING|PASSED|FAILED|EXPIRED
+  status      String    @default("PENDING")
+  completedAt DateTime?
+  expiresAt   DateTime?
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([caregiverId])
+}
+
+model Skill {
+  id          String           @id @default(cuid())
+  name        String           @unique
+  caregivers  CaregiverSkill[]
+}
+
+model CaregiverSkill {
+  id          String    @id @default(cuid())
+  caregiver   Caregiver @relation(fields: [caregiverId], references: [id], onDelete: Cascade)
+  caregiverId String
+  skill       Skill     @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  skillId     String
+
+  @@unique([caregiverId, skillId])
+  @@index([caregiverId])
+}
+
+model Availability {
+  id          String    @id @default(cuid())
+  caregiver   Caregiver @relation(fields: [caregiverId], references: [id], onDelete: Cascade)
+  caregiverId String
+  dayOfWeek   Int // 0=Sun .. 6=Sat
+  startTime   String // "08:00"
+  endTime     String // "17:00"
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([caregiverId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 1/3/4 — VISITS, SCHEDULING, EVV
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Visit {
+  id           String    @id @default(cuid())
+  agency       Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId     String
+  patient      Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId    String
+  caregiver    Caregiver? @relation(fields: [caregiverId], references: [id], onDelete: SetNull)
+  caregiverId  String?
+  serviceAuth  ServiceAuthorization? @relation(fields: [serviceAuthId], references: [id], onDelete: SetNull)
+  serviceAuthId String?
+  serviceType  String   @default("PERSONAL_CARE") // PERSONAL_CARE|SKILLED_NURSING|COMPANION|THERAPY
+  // SCHEDULED|OPEN|IN_PROGRESS|COMPLETED|MISSED|CANCELED
+  status       String   @default("SCHEDULED")
+  scheduledStart DateTime
+  scheduledEnd   DateTime
+  actualStart  DateTime?
+  actualEnd    DateTime?
+  // For recurrence templates
+  isRecurring  Boolean  @default(false)
+  recurrenceRule String? // simple RRULE-ish: "WEEKLY:MO,WE,FR"
+  cancelReason String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  evv       EvvRecord?
+  visitNote VisitNote?
+
+  @@index([agencyId])
+  @@index([patientId])
+  @@index([caregiverId])
+  @@index([status])
+  @@index([scheduledStart])
+}
+
+model EvvRecord {
+  id          String   @id @default(cuid())
+  visit       Visit    @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  visitId     String   @unique
+  checkInAt   DateTime?
+  checkInLat  Float?
+  checkInLng  Float?
+  checkInMethod String? // GPS|MOBILE|QR|MANUAL
+  checkOutAt  DateTime?
+  checkOutLat Float?
+  checkOutLng Float?
+  // PENDING|VERIFIED|FAILED|MANUAL_OVERRIDE
+  verification String  @default("PENDING")
+  durationMinutes Int?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 5 / 32 — CLINICAL DOCUMENTATION & CARE PLANS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model VisitNote {
+  id        String   @id @default(cuid())
+  agency    Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId  String
+  visit     Visit?   @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  visitId   String?  @unique
+  patient   Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId String
+  authorId  String?
+  type      String   @default("PROGRESS") // SOAP|PROGRESS|OBSERVATION
+  subjective String?
+  objective  String?
+  assessment String?
+  plan       String?
+  narrative  String?
+  // DRAFT|SIGNED
+  status    String   @default("DRAFT")
+  signedAt  DateTime?
+  aiDraft   Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([agencyId])
+  @@index([patientId])
+}
+
+model Assessment {
+  id        String   @id @default(cuid())
+  agency    Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId  String
+  patient   Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId String
+  type      String   @default("INITIAL") // INITIAL|REASSESSMENT|RISK
+  summary   String?
+  riskScore Int?
+  fallRisk  String?  // LOW|MODERATE|HIGH
+  performedAt DateTime?
+  nextDueAt   DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([agencyId])
+  @@index([patientId])
+}
+
+model CarePlan {
+  id        String   @id @default(cuid())
+  agency    Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId  String
+  patient   Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId String
+  title     String   @default("Care Plan")
+  // ACTIVE|DRAFT|ARCHIVED
+  status    String   @default("ACTIVE")
+  startDate DateTime?
+  reviewDate DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  goals CareGoal[]
+
+  @@index([agencyId])
+  @@index([patientId])
+}
+
+model CareGoal {
+  id          String   @id @default(cuid())
+  carePlan    CarePlan @relation(fields: [carePlanId], references: [id], onDelete: Cascade)
+  carePlanId  String
+  description String
+  intervention String?
+  // NOT_STARTED|IN_PROGRESS|MET|NOT_MET|DISCONTINUED
+  status      String   @default("IN_PROGRESS")
+  progress    Int      @default(0) // 0-100
+  targetDate  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([carePlanId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 30 — INCIDENT MANAGEMENT
+// ─────────────────────────────────────────────────────────────────────────────
+
+model IncidentReport {
+  id          String   @id @default(cuid())
+  agency      Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId    String
+  patient     Patient? @relation(fields: [patientId], references: [id], onDelete: SetNull)
+  patientId   String?
+  type        String // FALL|INJURY|ABUSE_ALLEGATION|MEDICATION_ERROR|PROPERTY_DAMAGE|MISSING_PATIENT|EMERGENCY_CALL
+  severity    String   @default("LOW") // LOW|MODERATE|HIGH|CRITICAL
+  description String
+  occurredAt  DateTime?
+  reportedById String?
+  // REPORTED|UNDER_REVIEW|INVESTIGATING|CORRECTIVE_ACTION|RESOLVED
+  status      String   @default("REPORTED")
+  correctiveAction String?
+  resolvedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([agencyId])
+  @@index([patientId])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 6 / 24 — COMPLIANCE & AHCA
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ComplianceItem {
+  id          String     @id @default(cuid())
+  agency      Agency     @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId    String
+  caregiver   Caregiver? @relation(fields: [caregiverId], references: [id], onDelete: Cascade)
+  caregiverId String?
+  // Scope: AGENCY (license, insurance, workers comp, policies) or CAREGIVER (cert/training)
+  scope       String     @default("CAREGIVER") // AGENCY|CAREGIVER
+  category    String // LICENSE|CERTIFICATION|CPR|CEU|BACKGROUND|INSURANCE|TRAINING|WORKERS_COMP|POLICY|EMERGENCY_PLAN
+  name        String
+  // VALID|EXPIRING|EXPIRED|MISSING
+  status      String     @default("VALID")
+  issuedAt    DateTime?
+  expiresAt   DateTime?
+  notes       String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([agencyId])
+  @@index([caregiverId])
+  @@index([expiresAt])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 17 — DOCUMENT MANAGEMENT
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Document {
+  id          String     @id @default(cuid())
+  agency      Agency     @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId    String
+  patient     Patient?   @relation(fields: [patientId], references: [id], onDelete: SetNull)
+  patientId   String?
+  caregiver   Caregiver? @relation(fields: [caregiverId], references: [id], onDelete: SetNull)
+  caregiverId String?
+  name        String
+  category    String     @default("OTHER") // LICENSE|INSURANCE|CARE_PLAN|CONTRACT|CONSENT|ASSESSMENT|POLICY|OTHER
+  url         String? // storage pointer
+  version     Int        @default(1)
+  signed      Boolean    @default(false)
+  signedBy    String?
+  signedAt    DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([agencyId])
+  @@index([patientId])
+  @@index([caregiverId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 10 — COMMUNICATION
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Conversation {
+  id        String    @id @default(cuid())
+  agency    Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId  String
+  subject   String?
+  // DIRECT|GROUP
+  kind      String    @default("DIRECT")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  messages  Message[]
+
+  @@index([agencyId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  agency         Agency       @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId       String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String
+  sender         User?        @relation(fields: [senderId], references: [id], onDelete: SetNull)
+  senderId       String?
+  body           String
+  attachmentUrl  String?
+  readAt         DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@index([agencyId])
+  @@index([conversationId])
+}
+
+model Announcement {
+  id        String   @id @default(cuid())
+  agency    Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId  String
+  title     String
+  body      String
+  // NORMAL|EMERGENCY
+  priority  String   @default("NORMAL")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([agencyId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 11 — BILLING
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Invoice {
+  id          String        @id @default(cuid())
+  agency      Agency        @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId    String
+  patient     Patient?      @relation(fields: [patientId], references: [id], onDelete: SetNull)
+  patientId   String?
+  number      String?
+  // PRIVATE|MEDICARE|MEDICAID|COMMERCIAL
+  billType    String        @default("PRIVATE")
+  // DRAFT|SENT|PAID|PARTIAL|VOID|OVERDUE
+  status      String        @default("DRAFT")
+  amount      Float         @default(0)
+  amountPaid  Float         @default(0)
+  issuedAt    DateTime?
+  dueAt       DateTime?
+  notes       String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  lines       InvoiceLine[]
+  payments    Payment[]
+
+  @@index([agencyId])
+  @@index([patientId])
+  @@index([status])
+}
+
+model InvoiceLine {
+  id          String  @id @default(cuid())
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoiceId   String
+  description String
+  quantity    Float   @default(1)
+  unitPrice   Float   @default(0)
+  amount      Float   @default(0)
+
+  @@index([invoiceId])
+}
+
+model Payment {
+  id        String   @id @default(cuid())
+  agency    Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId  String
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  invoiceId String?
+  amount    Float
+  method    String   @default("CASH") // CASH|CARD|CHECK|ACH|INSURANCE
+  // COMPLETED|PENDING|REFUNDED
+  status    String   @default("COMPLETED")
+  reference String?
+  paidAt    DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([agencyId])
+  @@index([invoiceId])
+}
+
+model Claim {
+  id          String   @id @default(cuid())
+  agency      Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId    String
+  patientName String?
+  payerType   String   @default("MEDICAID") // MEDICARE|MEDICAID|COMMERCIAL
+  // DRAFT|SUBMITTED|ACCEPTED|DENIED|PAID
+  status      String   @default("DRAFT")
+  amount      Float    @default(0)
+  amountPaid  Float    @default(0)
+  submittedAt DateTime?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([agencyId])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 12 — PAYROLL
+// ─────────────────────────────────────────────────────────────────────────────
+
+model PayrollEntry {
+  id          String    @id @default(cuid())
+  agency      Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId    String
+  caregiver   Caregiver @relation(fields: [caregiverId], references: [id], onDelete: Cascade)
+  caregiverId String
+  periodStart DateTime
+  periodEnd   DateTime
+  hoursWorked Float     @default(0)
+  overtimeHours Float   @default(0)
+  mileage     Float     @default(0)
+  bonus       Float     @default(0)
+  shiftDifferential Float @default(0)
+  grossPay    Float     @default(0)
+  // DRAFT|APPROVED|EXPORTED|PAID
+  status      String    @default("DRAFT")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([agencyId])
+  @@index([caregiverId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 13 / 25 — HR & ONBOARDING
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Applicant {
+  id          String   @id @default(cuid())
+  agency      Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId    String
+  firstName   String
+  lastName    String
+  email       String?
+  phone       String?
+  position    String?  // discipline applying for
+  experience  String?
+  resumeUrl   String?
+  // APPLICATION|REVIEW|SCREENING|DOCUMENTATION|TRAINING|APPROVAL|HIRED|REJECTED
+  stage       String   @default("APPLICATION")
+  recruiter   String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([agencyId])
+  @@index([stage])
+}
+
+model Evaluation {
+  id          String   @id @default(cuid())
+  agency      Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId    String
+  caregiverId String?
+  reviewer    String?
+  period      String?
+  score       Int? // 0-100
+  strengths   String?
+  improvements String?
+  // DRAFT|FINALIZED
+  status      String   @default("DRAFT")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([agencyId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 16 / 26 — REFERRAL MANAGEMENT
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ReferralSource {
+  id        String     @id @default(cuid())
+  agency    Agency     @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId  String
+  name      String
+  type      String     @default("HOSPITAL") // HOSPITAL|PHYSICIAN|SOCIAL_WORKER|REHAB|NURSING_HOME|ALF|EXISTING_CLIENT|MARKETING
+  contactName String?
+  phone     String?
+  email     String?
+  active    Boolean    @default(true)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  referrals Referral[]
+
+  @@index([agencyId])
+}
+
+model Referral {
+  id            String          @id @default(cuid())
+  agency        Agency          @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId      String
+  source        ReferralSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  sourceId      String?
+  patient       Patient?        @relation(fields: [patientId], references: [id], onDelete: SetNull)
+  patientId     String?         @unique
+  prospectName  String
+  coordinator   String?
+  // LEAD|CONTACTED|ASSESSMENT_SCHEDULED|ASSESSMENT_COMPLETED|ACCEPTED|ADMITTED|ACTIVE|LOST
+  stage         String          @default("LEAD")
+  estimatedRevenue Float        @default(0)
+  receivedAt    DateTime        @default(now())
+  admittedAt    DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@index([agencyId])
+  @@index([sourceId])
+  @@index([stage])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 27 / 28 — MEDICAID WAIVERS & SERVICE AUTHORIZATION
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ServiceAuthorization {
+  id          String   @id @default(cuid())
+  agency      Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId    String
+  patient     Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId   String
+  authNumber  String?
+  payerType   String   @default("MEDICAID") // MEDICARE|MEDICAID|COMMERCIAL|WAIVER|PRIVATE
+  serviceType String   @default("PERSONAL_CARE")
+  approvedHours Float  @default(0)
+  usedHours     Float  @default(0)
+  startDate   DateTime?
+  endDate     DateTime?
+  // ACTIVE|EXPIRED|EXHAUSTED|PENDING
+  status      String   @default("ACTIVE")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  visits Visit[]
+
+  @@index([agencyId])
+  @@index([patientId])
+  @@index([status])
+}
+
+model MedicaidWaiver {
+  id            String   @id @default(cuid())
+  agency        Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId      String
+  patient       Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId     String
+  program       String   @default("HCBS") // HCBS|LTC|COMMUNITY
+  authNumber    String?
+  approvedHours Float    @default(0)
+  usedHours     Float    @default(0)
+  startDate     DateTime?
+  endDate       DateTime?
+  // ACTIVE|EXPIRING|EXPIRED|PENDING
+  status        String   @default("ACTIVE")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([agencyId])
+  @@index([patientId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 14 / 29 / 33 — QUALITY ASSURANCE & PERFORMANCE
+// ─────────────────────────────────────────────────────────────────────────────
+
+model QualityReview {
+  id          String   @id @default(cuid())
+  agency      Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId    String
+  period      String?
+  complianceScore Int? // 0-100
+  satisfactionScore Int?
+  incidentRate Float?
+  missedVisitRate Float?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([agencyId])
+}
+
+model SatisfactionSurvey {
+  id          String   @id @default(cuid())
+  agency      Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId    String
+  patient     Patient? @relation(fields: [patientId], references: [id], onDelete: SetNull)
+  patientId   String?
+  respondent  String   @default("PATIENT") // PATIENT|FAMILY
+  rating      Int // 1-5
+  comments    String?
+  createdAt   DateTime @default(now())
+
+  @@index([agencyId])
+  @@index([patientId])
+}
+
+model PerformanceRecord {
+  id           String    @id @default(cuid())
+  agency       Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId     String
+  caregiver    Caregiver @relation(fields: [caregiverId], references: [id], onDelete: Cascade)
+  caregiverId  String
+  period       String?
+  attendanceScore   Int? // 0-100 sub-scores
+  documentationScore Int?
+  satisfactionScore  Int?
+  complianceScore    Int?
+  trainingScore      Int?
+  overallScore       Int? // 0-100 composite
+  notes        String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([agencyId])
+  @@index([caregiverId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 31 — EMERGENCY PREPAREDNESS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model EmergencyPlan {
+  id              String   @id @default(cuid())
+  patient         Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId       String   @unique
+  evacuationPlan  String?
+  backupCaregiver String?
+  equipmentNeeds  String?
+  // LOW|MODERATE|HIGH (priority for emergencies)
+  riskLevel       String   @default("LOW")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model EmergencyEvent {
+  id          String   @id @default(cuid())
+  agency      Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId    String
+  type        String // HURRICANE|FLOOD|POWER_OUTAGE|FACILITY_CLOSURE|PUBLIC_HEALTH
+  name        String
+  // MONITORING|ACTIVE|RESOLVED
+  status      String   @default("MONITORING")
+  startedAt   DateTime?
+  resolvedAt  DateTime?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([agencyId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 18 / 34 — AI MODULES (stored insights produced by the AI layer)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AiInsight {
+  id         String   @id @default(cuid())
+  agency     Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId   String
+  // SCHEDULER|ROUTE|STAFFING|CLINICAL_SUMMARY|RISK|FALL_RISK|HOSPITALIZATION|COMPLIANCE|REVENUE_FORECAST|REFERRAL
+  module     String
+  title      String
+  body       String
+  severity   String   @default("INFO") // INFO|WARNING|CRITICAL
+  entityType String? // PATIENT|CAREGIVER|VISIT|AGENCY
+  entityId   String?
+  createdAt  DateTime @default(now())
+
+  @@index([agencyId])
+  @@index([module])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 19 / 22 — ADMIN, AUDIT, API KEYS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  agency    Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId  String
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actorId   String?
+  action    String
+  target    String?
+  oldValue  String?
+  newValue  String?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([agencyId])
+  @@index([actorId])
+}
+
+model SecurityEvent {
+  id        String   @id @default(cuid())
+  agency    Agency?  @relation(fields: [agencyId], references: [id], onDelete: SetNull)
+  agencyId  String?
+  kind      String // LOGIN_SUCCESS|LOGIN_FAILURE|RATE_LIMIT|FORBIDDEN|CSRF|2FA
+  actorId   String?
+  detail    String?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([agencyId])
+}
+
+model ApiKey {
+  id         String   @id @default(cuid())
+  agency     Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId   String
+  name       String
+  prefix     String
+  hashedKey  String
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([agencyId])
+}
