@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(npx prisma generate)",
+      "PowerShell(Get-Process node -ErrorAction SilentlyContinue | Select-Object Id, StartTime, @{n='CPU\\(s\\)';e={[math]::Round\\($_.CPU,1\\)}}, Path | Format-Table -AutoSize)",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Select-Object ProcessId, @{n='Cmd';e={$_.CommandLine}} | Format-List)",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | ForEach-Object { \"{0}: {1}\" -f $_.ProcessId, $_.CommandLine })",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Select-Object ProcessId, CommandLine | Out-File -FilePath \"$env:TEMP\\\\nodeprocs.txt\" -Encoding utf8 -Width 500; Get-Content \"$env:TEMP\\\\nodeprocs.txt\")",
+      "Read(//c/Users/heela/AppData/Local/Temp/**)",
+      "PowerShell(npx prisma generate 2>&1)",
+      "PowerShell(npm run verify 2>&1)",
+      "PowerShell(Get-Process -Id 34732 -ErrorAction SilentlyContinue)",
+      "PowerShell(Stop-Process -Id 34732 -Force)",
+      "PowerShell(\"stopped\")",
+      "PowerShell($env:PORT=\"3939\"; npx next start -p 3939)",
+      "PowerShell(node tmp_signup.js)",
+      "PowerShell(try { $c = Get-NetTCPConnection -LocalPort 3939 -State Listen -ErrorAction Stop; $c.OwningProcess | Select-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force; \"stopped PID $_\" } } catch { \"no listener on 3939 \\(already stopped\\)\" })"
+    ]
+  }
+}

@@ -21,10 +21,15 @@ export function POST(req: Request) {
     const token = crypto.randomBytes(24).toString("base64url");
     await prisma.user.update({ where: { id: ctx.userId }, data: { emailVerifyToken: token } });
 
+    // Per-agency email branding (from display name).
+    const agency = await prisma.agency.findUnique({ where: { id: ctx.agencyId }, select: { emailFromName: true, portalName: true, name: true } });
+    const brand = agency?.emailFromName || agency?.portalName || agency?.name || undefined;
+
     const url = `${config.nextAuthUrl}/api/auth/verify?token=${token}`;
     const { delivered } = await sendMail({
       to: ctx.email,
-      subject: "Verify your Cura_Sera email",
+      fromName: brand,
+      subject: `Verify your ${brand ?? "Cura_Sera"} email`,
       text: `Hi ${ctx.name},\n\nPlease verify your email by visiting:\n${url}\n\nIf you didn't request this, ignore this message.`,
     });
     // In dev (no mail provider), return the link so the UI can show it.

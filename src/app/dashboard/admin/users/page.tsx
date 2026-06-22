@@ -1,4 +1,7 @@
+import { requireCap, GRANTABLE_CAPABILITIES } from "@/lib/authz";
 import { CrudResource, type CrudConfig } from "@/components/CrudResource";
+import { InviteManager } from "@/components/InviteManager";
+import { UserPermissions } from "@/components/UserPermissions";
 import { ROLE_LABELS, labelsToOptions } from "@/lib/enums";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +34,14 @@ const cfg: CrudConfig = {
   ],
 };
 
-export default function AdminUsersPage() {
-  return <CrudResource {...cfg} />;
+export default async function AdminUsersPage() {
+  const ctx = await requireCap("admin:manage");
+  const isOwner = ctx.role === "AGENCY_OWNER" || ctx.role === "PLATFORM_OWNER";
+  return (
+    <div>
+      <InviteManager />
+      {isOwner && <UserPermissions grantable={GRANTABLE_CAPABILITIES} />}
+      <CrudResource {...cfg} />
+    </div>
+  );
 }

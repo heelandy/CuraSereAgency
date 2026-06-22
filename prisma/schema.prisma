@@ -78,6 +78,7 @@ model Agency {
 
   // Relations (back-refs)
   domains              AgencyDomain[]
+  invitations          Invitation[]
   users                User[]
   branches             Branch[]
   departments          Department[]
@@ -141,6 +142,28 @@ model AgencyDomain {
   @@index([agencyId])
 }
 
+// Employee invitations — an agency owner/admin generates a link (with a preset
+// role/branch) and sends it; the invitee registers into THIS agency via the link.
+model Invitation {
+  id            String   @id @default(cuid())
+  agency        Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId      String
+  email         String
+  role          String   // staff role assigned on acceptance
+  branchId      String?
+  token         String   @unique
+  invitedById   String?
+  invitedByName String?
+  // PENDING|ACCEPTED|REVOKED
+  status        String   @default("PENDING")
+  expiresAt     DateTime
+  acceptedAt    DateTime?
+  createdAt     DateTime @default(now())
+
+  @@index([agencyId])
+  @@index([email])
+}
+
 model Branch {
   id          String       @id @default(cuid())
   agency      Agency       @relation(fields: [agencyId], references: [id], onDelete: Cascade)
@@ -192,6 +215,8 @@ model User {
   // AGENCY_OWNER|AGENCY_ADMIN|CLINICAL_DIRECTOR|NURSE_SUPERVISOR|SCHEDULER|
   // RN|LPN|CAREGIVER|HHA|BILLING|HR|COMPLIANCE|AUDITOR|PATIENT|FAMILY|PLATFORM_OWNER
   role         String   @default("CAREGIVER")
+  // Owner-granted extra capabilities beyond the role default (JSON string array).
+  extraCapabilities String?
   active       Boolean  @default(true)
   // Bumping tokenVersion invalidates all existing JWTs (force logout / ban).
   tokenVersion Int      @default(0)
@@ -263,6 +288,8 @@ model Patient {
   dischargedAt DateTime?
   requiredSkills  String? // comma-separated, used by skills-matrix matching
   genderPreference String? // preferred caregiver gender (matching)
+  neededHoursPerWeek Int? // care hours/week needed — required at registration
+  availableDays   String? // comma day codes (MO,TU,WE,TH,FR,SA,SU) — required at registration
   notes      String?
 
   // Portal access
@@ -1445,6 +1472,7 @@ model IntegrationSetting {
   provider  String // QUICKBOOKS|ADP|GUSTO|PAYCHEX|STRIPE|TWILIO|DOCUSIGN|GOOGLE|MICROSOFT|ZOOM
   connected Boolean  @default(false)
   config    String? // JSON (non-secret) settings
+  secret    String? // API key / token, AES-256-GCM encrypted at rest (enc:v1:)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

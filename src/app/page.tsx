@@ -41,7 +41,7 @@ export default function LandingPage() {
           </nav>
           <div className="flex items-center gap-2">
             <Link href="/login" className="btn-ghost">Sign in</Link>
-            <Link href="#services" className="btn-primary">Request Care</Link>
+            <Link href="/signup" className="btn-primary">Start your agency</Link>
           </div>
         </div>
       </header>
@@ -133,11 +133,32 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* For agencies — SaaS sign-up */}
+      <section id="agencies" className="border-t border-surface-200 bg-gradient-to-br from-brand-600 to-brand-700">
+        <div className="mx-auto flex max-w-6xl flex-col items-center gap-5 px-4 py-14 text-center text-white">
+          <span className="badge bg-white/15 text-white">For home care agencies</span>
+          <h2 className="max-w-2xl text-3xl font-semibold">Run your whole agency on one platform.</h2>
+          <p className="max-w-xl text-brand-50">
+            Patients, caregivers, scheduling, EVV, compliance, billing and payroll — with
+            your own branding. Create your agency in minutes; you become the owner and
+            invite your team.
+          </p>
+          <div className="flex flex-wrap justify-center gap-3">
+            <Link href="/signup" className="btn-secondary px-6 py-3">Start your agency free</Link>
+            <Link href="/login" className="btn-ghost px-6 py-3 text-white hover:bg-white/10">Sign in</Link>
+          </div>
+          <p className="text-xs text-brand-100">14-day trial · no credit card required</p>
+        </div>
+      </section>
+
       <footer className="border-t border-surface-200 bg-surface-50">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 py-8 text-sm text-surface-500 sm:flex-row">
           <Logo />
           <p>© {new Date().getFullYear()} Cura_Sera Agency. Compassionate care, complete platform.</p>
-          <Link href="/login" className="text-brand-600 hover:underline">Staff &amp; Family Portal →</Link>
+          <div className="flex items-center gap-4">
+            <Link href="/signup" className="text-brand-600 hover:underline">Start your agency →</Link>
+            <Link href="/login" className="text-brand-600 hover:underline">Staff &amp; Family Portal →</Link>
+          </div>
         </div>
       </footer>
     </div>

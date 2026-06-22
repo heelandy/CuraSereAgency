@@ -4,7 +4,10 @@ import { handle, json, Errors } from "@/lib/http";
 import { mutationGuard, RateLimits } from "@/lib/rate-limit";
 import { portalRequestSchema } from "@/lib/validation";
 import { portalPatientId } from "@/lib/portal";
-import { PORTAL_ROLES } from "@/lib/enums";
+import { PORTAL_ROLES, SELF_SERVICE_MIN_NOTICE_HOURS } from "@/lib/enums";
+
+// Change types that target a dated visit (subject to the advance-notice rule).
+const DATED_TYPES = new Set(["RESCHEDULE", "CANCEL", "NEW_VISIT", "CAREGIVER_CHANGE"]);
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +35,24 @@ export function POST(req: Request) {
     if (!patientId) throw Errors.badRequest("No linked patient record");
 
     const data = portalRequestSchema.parse(await req.json().catch(() => ({})));
+
+    // Advance-notice rule: change requests must be made at least 24h before the
+    // visit (inside 48h they still require senior staff to apply on approval).
+    if (DATED_TYPES.has(data.type)) {
+      const minMs = SELF_SERVICE_MIN_NOTICE_HOURS * 3_600_000;
+      if (data.visitId) {
+        const v = await prisma.visit.findFirst({
+          where: { id: data.visitId, agencyId: ctx.agencyId, patientId }, select: { scheduledStart: true },
+        });
+        if (v && new Date(v.scheduledStart).getTime() - Date.now() < minMs) {
+          throw Errors.badRequest(`Changes must be requested at least ${SELF_SERVICE_MIN_NOTICE_HOURS} hours before the visit. Please call the office.`);
+        }
+      }
+      if (data.preferredDate && new Date(data.preferredDate).getTime() - Date.now() < minMs) {
+        throw Errors.badRequest(`Please choose a date at least ${SELF_SERVICE_MIN_NOTICE_HOURS} hours from now.`);
+      }
+    }
+
     const created = await prisma.scheduleRequest.create({
       data: { ...data, agencyId: ctx.agencyId, patientId, requestedById: ctx.userId, requestedByName: ctx.name },
     });

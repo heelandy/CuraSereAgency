@@ -61,11 +61,13 @@ export function LoginForm() {
         <p className="mb-2 font-medium text-surface-600">Demo accounts (password: password123)</p>
         <div className="flex flex-wrap gap-1.5">
           {[
+            ["Super Admin", "superadmin@curasera.com"],
             ["Owner", "owner@curasera.com"],
             ["Scheduler", "scheduler@curasera.com"],
             ["Nurse Sup.", "nurse@curasera.com"],
             ["RN", "rn@curasera.com"],
             ["LPN", "lpn@curasera.com"],
+            ["Med Tech", "medtech@curasera.com"],
             ["HHA", "hha@curasera.com"],
             ["CNA", "cna@curasera.com"],
             ["Billing", "billing@curasera.com"],

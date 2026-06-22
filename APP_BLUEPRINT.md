@@ -200,6 +200,38 @@ folder→role mapping (frontend / backend / database) even though it deploys as 
   features land. Run a code review on the diff and save findings to `CODE_REVIEW.md`.
 - (Windows/OneDrive only) prepend Node to PATH, set `DATABASE_URL`, and kill node +
   delete the `.next` dir before building to avoid file-lock/EINVAL errors.
+  `prisma generate` can fail intermittently with `EPERM` (file lock) while the dev
+  server runs or OneDrive syncs — stop dev or simply retry.
+
+### 14.1 Standard command surface (document every command)
+
+Every app from this blueprint exposes the same script set in `package.json`, and
+the README documents all of them (commands and scripts should map 1:1 — no orphans
+either direction). Keep the project-specific seed logins in the README, never here.
+
+```jsonc
+// package.json → "scripts"
+"dev":          "next dev",                              // hot-reload dev server
+"build":        "prisma generate && next build",         // production build
+"start":        "next start",                            // serve the build
+"lint":         "next lint",
+"typecheck":    "tsc --noEmit",
+"test":         "vitest run",
+"test:watch":   "vitest",
+"verify":       "tsc --noEmit && vitest run",            // one-shot pre-commit gate
+"db:push":      "prisma db push",                        // apply schema (no migrations in dev)
+"db:generate":  "prisma generate",                       // regenerate client after schema edits
+"db:seed":      "tsx prisma/seed.ts",
+"db:studio":    "prisma studio",
+"db:reset":     "prisma db push --force-reset && npm run db:seed"
+```
+
+Workflow: edit `schema.prisma` → `db:push` → `db:generate`; before committing run
+`verify`; the definition of done stays `verify` + `build` green. Mirror the script
+set with an **env-var table** in both `.env.example` and the README — at minimum
+`DATABASE_URL`, `NEXTAUTH_SECRET`/`NEXTAUTH_URL`, the field-encryption key, the mail
+provider key + from-address, the white-label root domain, and any billing keys —
+each marked optional-with-fallback for local dev vs. required-in-prod.
 
 ---
 
@@ -334,6 +366,49 @@ create** (validate every recipient) *and* surface it through a
 `/messages/recipients` endpoint so the compose UI only ever offers allowed
 targets. Frontend filtering is convenience; the create-time check is the rule.
 
+### 16.17 Owner-granted per-user permissions (capabilities beyond the role)
+Roles are the baseline; let the tenant owner grant **extra capabilities to
+individual users** without inventing new roles. Store a `extraCapabilities` JSON
+array on the user, define a curated **grantable** allow-list (never `admin:manage`
+/ `platform:manage`), and compute **effective caps** once in the request context:
+`effectiveCaps(role, granted) = ROLE_CAPS[role] ∪ granted` — auto-adding the
+`:read` sibling for any granted `:write` so the matching nav/list also appears.
+Switch enforcement from role-based to context-based: `requireCapability(ctx, cap)`
+and a `can(ctx, cap)` check `ctx.caps`, and `filterNav(ctx.caps, …)` drives the
+sidebar. Only the owner may edit grants (gate the mutation on the owner role, not
+just `admin:manage`), and re-filter the submitted list against the allow-list so a
+forged payload can't escalate. This is how "patient admissions is Owner+Admin, but
+the owner can also enable it for a coordinator" works with zero new roles.
+
+### 16.15 Platform super-admin + "view as" tenant impersonation
+A SaaS needs an operator above the tenants. Add a `PLATFORM_OWNER` role with a
+`platform:manage` capability and a console whose endpoints are the **only** ones
+that query without an `agencyId` scope (list all tenants, provision agency+owner,
+suspend, change plan) — every other route stays tenant-scoped. To let the operator
+*work inside* any tenant without a parallel UI, resolve an **effective agency** in
+the request context: when a platform owner sets an `acting_agency` cookie,
+`getOptionalUser()` swaps `ctx.agencyId` to it (keeping `homeAgencyId` for "Home"
+and an `impersonating` flag for a banner). The entire existing app — every
+tenant-scoped query, branding, nav — then operates on the chosen agency for free,
+with no per-page changes. Validate the cookie against `platform:manage` on every
+read so a stolen cookie on a normal account is inert.
+
+### 16.14 Authority that crosses role × credential; encrypted tenant secrets
+Some permissions track a **credential/discipline**, not an org role — e.g. "who may
+administer medication" is Med Tech / LPN / RN. Model it as its own capability
+(`meds:*`) and grant it to the licensed roles **plus** a dedicated role for the
+non-licensed-but-authorized case (a `MED_TECH` role), rather than overloading the
+generic field-staff role. Keep money behind a single predicate
+(`canSeeFinancials(role)`) and *subtract* it from otherwise-powerful roles — admin
+runs operations but is built as `ALL_CAPABILITIES` minus `billing:*`/`payroll:*`,
+so "Owner + Billing only" holds without per-view allow-lists everywhere. Make
+"required at registration" real by tightening the **Zod schema** (not just the form)
+so the API rejects incomplete records. Store per-tenant integration credentials with
+the same field-encryption used for PHE (`encryptField`, `enc:v1:` prefix) and never
+return them — expose only `hasSecret`. Transactional email is provider-agnostic:
+one `sendMail` that POSTs to Resend when `RESEND_API_KEY` is set (zero-dep fetch),
+carries a per-agency from-name for white-label, and falls back to a logged dev link.
+
 ### 16.13 Runtime white-label (customize data, not code)
 True multi-tenant branding is resolved **per request from the host**, never
 compiled in. Priority: **custom domain** (an `AgencyDomain` row, `domain` unique)
@@ -349,6 +424,19 @@ optional custom CSS. Everything else (portal name, logo, login banner, support
 info, PDF footer) is just agency columns read at render. Result: one codebase,
 one deploy, thousands of agencies each "having their own software." The admin
 panel edits these rows (branding + domains); no developer, no redeploy.
+
+### 16.16 Two distinct onboarding paths: tenant signup vs. employee invite
+Keep them separate. **Public signup** (`/signup`) creates a *new tenant* + its
+owner (role fixed server-side). **Employee invites** add a person to an
+*existing tenant*: an admin creates an `Invitation` (email + preset role + branch
++ unique token + expiry), the agency sends the link (emailed via the provider and
+shown to copy), and a **public** `/invite/<token>` page lets the invitee set
+name+password to create their account with the invited role — the link itself
+proves the email, so mark it verified. Validate the token server-side (PENDING +
+unexpired) on both render and accept, and re-check email uniqueness at accept time
+(it may have been taken since the invite). Auto-provision dependent records the
+role implies (e.g. a caregiver profile for field roles) so the account is usable
+on first login. Never trust a client-supplied role — it comes from the invite row.
 
 ### 16.12 Self-serve tenant signup (new tenant + its owner)
 A public signup that provisions a **new tenant** and makes the registrant its

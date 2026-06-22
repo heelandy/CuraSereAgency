@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { requireUser, hasCapability, seesAllBranches, patientAssignmentScoped } from "@/lib/authz";
+import { redirect } from "next/navigation";
+import { requireUser, can, seesAllBranches, patientAssignmentScoped, canSeeFinancials } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
 import { StatCard, SectionCard, Badge, PageHeader } from "@/components/ui";
 import { UsersIcon, UserIcon, CalendarIcon, DollarIcon, ShieldIcon, HeartIcon } from "@/components/icons";
@@ -11,6 +12,9 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardOverview() {
   const ctx = await requireUser();
+  // System super-admin lands on the platform-wide monitor, not a single agency —
+  // unless they're actively "viewing as" a specific tenant.
+  if (ctx.role === "PLATFORM_OWNER" && !ctx.impersonating) redirect("/dashboard/platform");
   // Field staff (caregivers/RN/LPN/HHA) get a personal, assignment-scoped home —
   // never agency-wide patient/caregiver/visit figures.
   if (patientAssignmentScoped(ctx.role)) return <CaregiverHome ctx={ctx} />;
@@ -59,20 +63,28 @@ export default async function DashboardOverview() {
     prisma.applicant.count({ where: { agencyId, stage: { notIn: ["HIRED", "REJECTED"] } } }),
   ]);
   const attention = [
-    hasCapability(ctx.role, "scheduling:read") && pendingRequests > 0
+    can(ctx, "scheduling:read") && pendingRequests > 0
       ? { label: "Pending requests", value: pendingRequests, href: "/dashboard/requests", tone: "amber" as const }
       : null,
-    hasCapability(ctx.role, "clinical:read") && draftNotes > 0
+    can(ctx, "clinical:read") && draftNotes > 0
       ? { label: "Unsigned visit notes", value: draftNotes, href: "/dashboard/visit-notes", tone: "blue" as const }
       : null,
-    hasCapability(ctx.role, "hr:read") && openApplicants > 0
+    can(ctx, "hr:read") && openApplicants > 0
       ? { label: "Applicants in pipeline", value: openApplicants, href: "/dashboard/applicants", tone: "violet" as const }
       : null,
   ].filter(Boolean) as { label: string; value: number; href: string; tone: "amber" | "blue" | "violet" }[];
 
   const ar = invoices.reduce((sum, i) => sum + (i.amount - i.amountPaid), 0);
-  // Outstanding A/R is financial-sensitive: only the agency owner and finance see it.
-  const canSeeAR = ["AGENCY_OWNER", "PLATFORM_OWNER", "BILLING"].includes(ctx.role);
+  // Revenue, A/R, payroll and profitability are Owner + Billing only.
+  const canSeeAR = canSeeFinancials(ctx.role);
+  let estProfit = 0;
+  if (canSeeAR) {
+    const [revAgg, payAgg] = await Promise.all([
+      prisma.payment.aggregate({ _sum: { amount: true }, where: { agencyId } }),
+      prisma.payrollEntry.aggregate({ _sum: { grossPay: true }, where: { agencyId } }),
+    ]);
+    estProfit = (revAgg._sum.amount ?? 0) - (payAgg._sum.grossPay ?? 0);
+  }
 
   const visitTone: Record<string, string> = { SCHEDULED: "blue", OPEN: "amber", IN_PROGRESS: "violet", COMPLETED: "green", MISSED: "red", CANCELED: "neutral" };
   const sevTone: Record<string, string> = { LOW: "neutral", MODERATE: "amber", HIGH: "red", CRITICAL: "red" };
@@ -89,6 +101,9 @@ export default async function DashboardOverview() {
         <StatCard label="Compliance Alerts" value={expiringCompliance} icon={<ShieldIcon />} tone={expiringCompliance > 0 ? "red" : "green"} href="/dashboard/compliance" />
         {canSeeAR && (
           <StatCard label="Outstanding A/R" value={fmtMoney(ar)} icon={<DollarIcon />} tone="green" href="/dashboard/invoices" />
+        )}
+        {canSeeAR && (
+          <StatCard label="Est. Profitability" value={fmtMoney(estProfit)} icon={<DollarIcon />} tone={estProfit >= 0 ? "green" : "red"} href="/dashboard/payroll" />
         )}
       </div>
 

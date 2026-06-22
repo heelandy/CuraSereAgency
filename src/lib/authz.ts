@@ -1,4 +1,5 @@
 import { getServerSession } from "next-auth";
+import { cookies } from "next/headers";
 import { authOptions } from "./auth";
 import { prisma } from "./prisma";
 import { Errors } from "./http";
@@ -69,7 +70,7 @@ export const ROLE_CAPS: Record<Role, Capability[]> = {
   // A/R, payroll and profitability are Owner + Billing only).
   AGENCY_ADMIN: ALL_CAPABILITIES.filter((c) => !c.startsWith("billing:") && !c.startsWith("payroll:")),
   CLINICAL_DIRECTOR: [
-    "patients:read", "patients:write", // admissions/intake authority
+    "patients:read", // patient create/edit/delete is Owner + Admin (admissions) only — owner may grant
     "caregivers:read", "caregivers:write",
     "scheduling:read", "scheduling:write",
     "care:read", "care:write",
@@ -188,6 +189,49 @@ export function hasCapability(role: Role, cap: Capability): boolean {
   return ROLE_CAPS[role]?.includes(cap) ?? false;
 }
 
+// ── Owner-granted per-user permissions ───────────────────────────────────────
+// Capabilities an Agency Owner may grant to individual users on top of their role
+// (deny-by-default still holds; the owner explicitly enables these).
+export const GRANTABLE_CAPABILITIES: { cap: Capability; label: string }[] = [
+  { cap: "patients:write", label: "Create / edit / delete patients (Admissions)" },
+  { cap: "scheduling:write", label: "Scheduling — assign & manage shifts" },
+  { cap: "caregivers:write", label: "Manage caregiver records" },
+  { cap: "clinical:write", label: "Clinical documentation" },
+  { cap: "meds:write", label: "Medication administration" },
+  { cap: "billing:write", label: "Billing & invoices" },
+  { cap: "payroll:write", label: "Payroll" },
+  { cap: "compliance:write", label: "Compliance" },
+  { cap: "hr:write", label: "HR" },
+  { cap: "documents:write", label: "Documents" },
+  { cap: "incidents:write", label: "Incident reports" },
+  { cap: "qa:write", label: "Quality assurance" },
+];
+const GRANTABLE_SET = new Set<Capability>(GRANTABLE_CAPABILITIES.map((g) => g.cap));
+
+// Parse a user's granted-capabilities JSON, keeping only grantable ones (so a
+// stale/forged value can never confer admin:manage, platform:manage, etc.).
+export function parseGrantedCaps(json: string | null | undefined): Capability[] {
+  if (!json) return [];
+  try {
+    const arr = JSON.parse(json) as unknown;
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((c): c is Capability => typeof c === "string" && GRANTABLE_SET.has(c as Capability));
+  } catch {
+    return [];
+  }
+}
+
+// Effective capabilities = role defaults ∪ owner-granted (with the read sibling
+// auto-added for any granted :write, so the matching nav/list also appears).
+export function effectiveCaps(role: Role, grantedJson: string | null | undefined): Capability[] {
+  const set = new Set<Capability>(ROLE_CAPS[role] ?? []);
+  for (const cap of parseGrantedCaps(grantedJson)) {
+    set.add(cap);
+    if (cap.endsWith(":write")) set.add(cap.replace(/:write$/, ":read") as Capability);
+  }
+  return [...set];
+}
+
 // ── Isolation helpers (data-isolation / role-visibility spec) ────────────────
 // Roles that see all branches in their agency; everyone else is branch-bound.
 const AGENCY_WIDE_BRANCH: Role[] = [
@@ -226,12 +270,18 @@ export function canMessage(sender: Role, recipient: Role): boolean {
 // ── Request context ──────────────────────────────────────────────────────────
 export type Ctx = {
   userId: string;
-  agencyId: string;
+  agencyId: string; // effective tenant (may be an impersonated one for platform owner)
+  homeAgencyId: string; // the user's own agency
   role: Role;
+  caps: Capability[]; // effective capabilities (role defaults ∪ owner-granted)
   email: string;
   name: string;
   branchId: string | null;
+  impersonating: boolean; // platform owner is viewing another agency ("view as")
 };
+
+// Cookie the platform owner sets to "view as" a specific agency.
+export const ACTING_AGENCY_COOKIE = "acting_agency";
 
 // Resolve the session AND re-read role/active/tokenVersion from the DB every
 // request, so a demoted/banned/force-logged-out user loses access immediately
@@ -247,13 +297,28 @@ export async function getOptionalUser(): Promise<Ctx | null> {
     return null;
   }
 
+  // Platform owner (super admin) may "view as" any agency: the acting-agency
+  // cookie overrides the effective tenant so the whole app operates on it.
+  let agencyId = user.agencyId;
+  let impersonating = false;
+  if (user.role === "PLATFORM_OWNER") {
+    const sel = cookies().get(ACTING_AGENCY_COOKIE)?.value;
+    if (sel && sel !== user.agencyId) {
+      const a = await prisma.agency.findUnique({ where: { id: sel }, select: { id: true } });
+      if (a) { agencyId = a.id; impersonating = true; }
+    }
+  }
+
   return {
     userId: user.id,
-    agencyId: user.agencyId,
+    agencyId,
+    homeAgencyId: user.agencyId,
     role: user.role as Role,
+    caps: effectiveCaps(user.role as Role, user.extraCapabilities),
     email: user.email,
     name: user.name,
-    branchId: user.branchId,
+    branchId: impersonating ? null : user.branchId, // agency-wide when impersonating
+    impersonating,
   };
 }
 
@@ -263,8 +328,13 @@ export async function requireUser(): Promise<Ctx> {
   return ctx;
 }
 
+// Capability check for a resolved request context — honors owner-granted caps.
+export function can(ctx: Ctx, cap: Capability): boolean {
+  return ctx.caps.includes(cap);
+}
+
 export function requireCapability(ctx: Ctx, cap: Capability): void {
-  if (!hasCapability(ctx.role, cap)) throw Errors.forbidden();
+  if (!can(ctx, cap)) throw Errors.forbidden();
 }
 
 export async function requireCap(cap: Capability): Promise<Ctx> {

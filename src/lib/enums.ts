@@ -31,6 +31,12 @@ export const ROLES = Object.keys(ROLE_LABELS) as Role[];
 // Roles that get the staff dashboard vs. the portals.
 export const PORTAL_ROLES: Role[] = ["PATIENT", "FAMILY"];
 
+// Roles an agency may invite an employee into. Patients/family register via the
+// patient side; the platform owner is system-level (never invited into a tenant).
+export const INVITABLE_ROLES: Role[] = ROLES.filter(
+  (r) => !["PATIENT", "FAMILY", "PLATFORM_OWNER"].includes(r),
+);
+
 // ── Patient ──────────────────────────────────────────────────────────────────
 export const PATIENT_STATUS = {
   ACTIVE: "Active",

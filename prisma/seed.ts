@@ -57,6 +57,7 @@ async function main() {
   // linked to below (so the greeting + My Shifts line up). "caregiver" is too
   // broad on its own — there's a discipline-specific account for RN/LPN/HHA/CNA.
   const users: [string, string, string][] = [
+    ["Sam Superadmin", "superadmin@curasera.com", "PLATFORM_OWNER"],
     ["Olivia Owner", "owner@curasera.com", "AGENCY_OWNER"],
     ["Aaron Admin", "admin@curasera.com", "AGENCY_ADMIN"],
     ["Dana Director", "director@curasera.com", "CLINICAL_DIRECTOR"],
@@ -64,6 +65,7 @@ async function main() {
     ["Sam Scheduler", "scheduler@curasera.com", "SCHEDULER"],
     ["James Okoro", "rn@curasera.com", "RN"],
     ["Mei Lin", "lpn@curasera.com", "LPN"],
+    ["Tom Webb", "medtech@curasera.com", "MED_TECH"],
     ["Carla Mendez", "hha@curasera.com", "HHA"],
     ["Sofia Reyes", "cna@curasera.com", "CAREGIVER"],
     ["David Klein", "caregiver@curasera.com", "CAREGIVER"],
@@ -88,6 +90,7 @@ async function main() {
     ["Carla", "Mendez", "HHA", "ACTIVE", "English,Spanish", 18.5, 25.9, -80.19],
     ["James", "Okoro", "RN", "ACTIVE", "English", 38.0, 25.77, -80.13],
     ["Mei", "Lin", "LPN", "ACTIVE", "English,Mandarin", 29.0, 25.82, -80.22],
+    ["Tom", "Webb", "MED_TECH", "ACTIVE", "English", 21.0, 25.78, -80.2],
     ["Sofia", "Reyes", "CNA", "ACTIVE", "English,Spanish", 17.0, 25.86, -80.3],
     ["David", "Klein", "COMPANION", "ACTIVE", "English", 16.0, 25.7, -80.28],
   ] as const;
@@ -99,6 +102,7 @@ async function main() {
         discipline: disc, status, languages: langs, hourlyRate: rate,
         email: `${first.toLowerCase()}@curasera.com`, phone: "(305) 555-02" + Math.floor(10 + Math.random() * 89),
         hireDate: daysFromNow(-200 - Math.floor(Math.random() * 300)), maxHoursPerWeek: 40,
+        skillSet: "Bathing,Mobility,Medication Reminders", availableDays: "MO,TU,WE,TH,FR",
         latitude: lat, longitude: lng, city: "Miami", state: "FL",
       },
     });
@@ -144,6 +148,7 @@ async function main() {
         mrn: `MRN-${1000 + i}`, dob: new Date(1940 + i, i, 12), phone: "(305) 555-03" + (10 + i),
         addressLine: `${100 + i} Coral Way`, city: "Miami", state: "FL", zip: "33134",
         admittedAt: daysFromNow(-90 - i * 10),
+        neededHoursPerWeek: 10 + i * 2, availableDays: "MO,WE,FR",
       },
     });
     patients.push(p);
@@ -282,9 +287,10 @@ async function main() {
   const caregiverLinks: [string, number][] = [
     ["rn@curasera.com", 1],        // James Okoro — RN
     ["lpn@curasera.com", 2],       // Mei Lin — LPN
+    ["medtech@curasera.com", 3],   // Tom Webb — Med Tech (can administer meds)
     ["hha@curasera.com", 0],       // Carla Mendez — HHA
-    ["cna@curasera.com", 3],       // Sofia Reyes — CNA
-    ["caregiver@curasera.com", 4], // David Klein — Companion (generic caregiver)
+    ["cna@curasera.com", 4],       // Sofia Reyes — CNA
+    ["caregiver@curasera.com", 5], // David Klein — Companion (generic caregiver)
   ];
   for (const [email, idx] of caregiverLinks) {
     const u = await prisma.user.findFirst({ where: { agencyId: agency.id, email } });
@@ -367,6 +373,14 @@ async function main() {
     data: { agencyId: agency.id, caregiverId: caregivers[0].id, type: "VACATION", hours: 16, startDate: daysFromNow(10), endDate: daysFromNow(12), status: "REQUESTED" },
   });
 
+  // Demo employee invitation (Admin > Users & Roles shows it; link below works).
+  await prisma.invitation.create({
+    data: {
+      agencyId: agency.id, email: "newhire@curasera.com", role: "HHA", token: "demo-invite-hha",
+      invitedByName: "Aaron Admin", status: "PENDING", expiresAt: daysFromNow(14),
+    },
+  });
+
   // ── SECOND AGENCY (white-label demo) ───────────────────────────────────────
   // Same codebase, different DATA → different brand. Visit http://sunrise.localhost:3000
   // (or sunrisecare.localhost) to see Sunrise's blue theme + portal name on login.
@@ -401,6 +415,7 @@ async function main() {
       data: {
         agencyId: sunrise.id, branchId: sBranch.id, firstName: first, lastName: last, discipline: disc,
         status: "ACTIVE", languages: "English", hourlyRate: disc === "RN" ? 39 : 18, city: "Orlando", state: "FL", maxHoursPerWeek: 40,
+        skillSet: "Bathing,Mobility", availableDays: "MO,TU,WE,TH,FR",
       },
     }));
   }
@@ -410,6 +425,7 @@ async function main() {
       data: {
         agencyId: sunrise.id, branchId: sBranch.id, firstName: first, lastName: last, status: "ACTIVE",
         addressLine: "12 Lake St", city: "Orlando", state: "FL", zip: "32801", admittedAt: daysFromNow(-40),
+        neededHoursPerWeek: 12, availableDays: "TU,TH",
       },
     }));
   }

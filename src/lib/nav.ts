@@ -1,6 +1,4 @@
 import type { Capability } from "./authz";
-import { hasCapability } from "./authz";
-import type { Role } from "./enums";
 import { NAV_FEATURE, featureEnabled, type FlagMap } from "./features";
 
 // Navigation model (data only; icon is a string key resolved in the Sidebar so
@@ -9,6 +7,12 @@ export type NavItem = { label: string; href: string; icon: string; caps?: Capabi
 export type NavGroup = { label: string; items: NavItem[] };
 
 export const NAV: NavGroup[] = [
+  {
+    label: "Platform",
+    items: [
+      { label: "Platform Console", href: "/dashboard/platform", icon: "building", caps: ["platform:manage"] },
+    ],
+  },
   {
     label: "Overview",
     items: [
@@ -104,11 +108,14 @@ export const NAV: NavGroup[] = [
   },
 ];
 
-export function filterNav(role: Role, flags?: FlagMap): NavGroup[] {
+// Filter by the user's EFFECTIVE capabilities (role defaults ∪ owner-granted),
+// so a granted permission reveals its nav item.
+export function filterNav(caps: Capability[], flags?: FlagMap): NavGroup[] {
+  const capSet = new Set(caps);
   return NAV.map((group) => ({
     ...group,
     items: group.items.filter((item) => {
-      const capOk = !item.caps || item.caps.some((c) => hasCapability(role, c));
+      const capOk = !item.caps || item.caps.some((c) => capSet.has(c));
       const feature = NAV_FEATURE[item.href];
       const featureOk = !feature || !flags || featureEnabled(flags, feature);
       return capOk && featureOk;

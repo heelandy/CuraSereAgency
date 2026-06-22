@@ -53,6 +53,20 @@ export function CaregiverShifts() {
     });
   }
 
+  // Caregiver requests to drop/change one of their own upcoming shifts (>=24h ahead).
+  async function requestChange(visitId: string) {
+    const reason = window.prompt("Reason for the change request (sent to your scheduler):");
+    if (reason === null) return;
+    setBusy(visitId);
+    const res = await fetch("/api/caregiver/request-change", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ visitId, message: reason.trim() || undefined }),
+    });
+    setBusy(null);
+    if (res.ok) { alert("Change requested — your scheduler will review it."); await load(); }
+    else { const j = await res.json().catch(() => ({})); alert(j.message || "Could not request a change."); }
+  }
+
   // Caregiver checks in / out of their OWN assigned shift (EVV).
   async function evv(visitId: string, action: "check-in" | "check-out") {
     let signatureName: string | undefined;
@@ -90,7 +104,7 @@ export function CaregiverShifts() {
                 <p className="muted">{SERVICE_TYPE[v.serviceType as keyof typeof SERVICE_TYPE] ?? v.serviceType}</p>
                 <p className="mt-1 text-xs text-surface-500">{[v.patient?.addressLine, v.patient?.city].filter(Boolean).join(", ") || "—"}</p>
                 {v.patient?.phone && <p className="text-xs text-surface-500">{v.patient.phone}</p>}
-                <div className="mt-3">
+                <div className="mt-3 space-y-1.5">
                   {v.status === "COMPLETED" ? (
                     <span className="badge-green">Visit verified</span>
                   ) : v.status === "IN_PROGRESS" ? (
@@ -98,9 +112,14 @@ export function CaregiverShifts() {
                       {busy === v.id ? "Saving…" : "Check out"}
                     </button>
                   ) : (
-                    <button className="btn-secondary btn-sm w-full" disabled={busy === v.id} onClick={() => evv(v.id, "check-in")}>
-                      {busy === v.id ? "Saving…" : "Check in"}
-                    </button>
+                    <>
+                      <button className="btn-secondary btn-sm w-full" disabled={busy === v.id} onClick={() => evv(v.id, "check-in")}>
+                        {busy === v.id ? "Saving…" : "Check in"}
+                      </button>
+                      <button className="btn-ghost btn-sm w-full text-surface-600" disabled={busy === v.id} onClick={() => requestChange(v.id)}>
+                        Request change
+                      </button>
+                    </>
                   )}
                 </div>
               </div>

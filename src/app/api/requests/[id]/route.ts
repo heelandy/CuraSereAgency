@@ -30,6 +30,12 @@ export function PATCH(req: Request, { params }: { params: { id: string } }) {
         }
       }
 
+      // Caregiver asked to drop a shift → unassign and re-open it to the marketplace.
+      if (existing.type === "DECLINE" && existing.visitId) {
+        const visit = await prisma.visit.findFirst({ where: { id: existing.visitId, agencyId: ctx.agencyId } });
+        if (visit) await prisma.visit.update({ where: { id: visit.id }, data: { caregiverId: null, status: "OPEN" } });
+      }
+
       // Patient requested a specific caregiver → reassign the target visit.
       if (existing.type === "CAREGIVER_CHANGE" && existing.preferredCaregiverId) {
         const cg = await prisma.caregiver.findFirst({

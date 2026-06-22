@@ -9,7 +9,7 @@ import {
   EMERGENCY_TYPE, AI_MODULE, ROLE_LABELS, EVV_METHOD, EVV_VERIFICATION,
   GENDER, MED_LOG_STATUS, TIME_OF_DAY, CARE_TASK_STATUS, REQUEST_TYPE,
   TIME_ENTRY_TYPE, TIME_ENTRY_STATUS, PTO_TYPE, PTO_STATUS, MILEAGE_TYPE, MILEAGE_STATUS,
-  EMPLOYMENT_TYPE, FORM_CATEGORY,
+  EMPLOYMENT_TYPE, FORM_CATEGORY, INVITABLE_ROLES,
 } from "./enums";
 
 // ── Helpers (APP_BLUEPRINT §8) ───────────────────────────────────────────────
@@ -86,6 +86,9 @@ export const patientSchema = z.object({
   dischargedAt: optionalDate,
   requiredSkills: optionalShort,
   genderPreference: z.preprocess(emptyToNull, enumOf(GENDER).nullable().optional()),
+  // Required at registration: care hours/week needed + days available.
+  neededHoursPerWeek: z.coerce.number().int().min(1, "Required").max(168),
+  availableDays: shortText,
   notes: longText,
 });
 
@@ -165,7 +168,10 @@ export const caregiverSchema = z.object({
   languages: optionalShort,
   gender: z.preprocess(emptyToNull, enumOf(GENDER).nullable().optional()),
   yearsExperience: optionalNum,
-  maxHoursPerWeek: optionalNum,
+  // Required at registration: skills selected + hours available + days available.
+  skillSet: shortText,
+  maxHoursPerWeek: z.coerce.number().int().min(1, "Required").max(168),
+  availableDays: shortText,
   latitude: optionalNum,
   longitude: optionalNum,
   notes: longText,
@@ -539,6 +545,17 @@ export const signupSchema = z.object({
   agencyName: shortText,
   name: shortText,
   email: z.string().trim().toLowerCase().email("Enter a valid email"),
+  password: z.string().min(8, "Use at least 8 characters").max(200),
+});
+
+// ── Employee invitations (agency sends a link; invitee registers into it) ─────
+export const inviteCreateSchema = z.object({
+  email: z.string().trim().toLowerCase().email("Enter a valid email"),
+  role: z.enum(INVITABLE_ROLES as [string, ...string[]]),
+  branchId: optionalId,
+});
+export const inviteAcceptSchema = z.object({
+  name: shortText,
   password: z.string().min(8, "Use at least 8 characters").max(200),
 });
 

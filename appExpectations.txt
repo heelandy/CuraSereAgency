@@ -17,6 +17,61 @@ zero-dep PDF, CSV export with formula-injection guard, Vitest tests.
 Verification: `tsc --noEmit` clean · 15/15 unit tests pass · `next build` green.
 
 LATEST BUILD ROUND — see BACKLOG.md for the full deduped checklist. Newly shipped:
+✅ HIDE EDIT/DELETE FOR UNAUTHORIZED — Add/Edit/Delete now disappear when the user
+   lacks a resource's write capability (effective caps incl. owner grants); the
+   generic resource page also read-gates (no read → not found). Applied to the
+   generic CRUD page + patients/caregivers/care-plans lists + every patient-detail
+   child panel (e.g. a nurse sees Allergies/Emergency Contacts but no Edit/Delete
+   since patient writes are Owner+Admin). Server still enforces every call — this is
+   defense-in-depth, not frontend-only. (Also fixed: patient Medications panel now
+   gated by meds:read, matching the med-administration rule.)
+✅ SIGN UP reachable + verified end-to-end. The landing page now has clear
+   "Start your agency" CTAs (header, a For-Agencies section, footer) → /signup.
+   /signup creates a new agency + makes you its Owner (smoke-tested: POST returns ok,
+   creates agency + branch + AGENCY_OWNER + email-verify token; dev returns the link).
+   (Agency-branded logins still hide "create new agency" by design; signup lives on
+   the platform marketing site. Employees join via invite links, not signup.)
+✅ PATIENT CRUD = Owner + Administrator (admissions) ONLY by default. Clinical
+   Director (and everyone else) is now read-only on patients unless granted.
+✅ OWNER-GRANTED PERMISSIONS — the Agency Owner can enable extra capabilities for
+   individual users beyond their role (Users & Roles → "Custom permissions", owner-
+   only). E.g. grant "Create/edit patients (Admissions)" to a coordinator. Stored
+   per user (extraCapabilities), merged into the request context as effective caps
+   (role ∪ grants, with read sibling auto-added); deny-by-default and non-grantable
+   caps (admin/platform) can never be granted. Nav + APIs honor granted caps.
+✅ EMPLOYEE INVITATIONS — the agency sends a link to staff. Owner/Admin → Users &
+   Roles → "Invite an employee": pick email + role (+ branch) → generates an invite
+   link (emailed via Resend AND shown to copy/share). The employee opens
+   /invite/<token>, sets name + password, and is registered INTO that agency with the
+   preset role (email auto-verified by the link). Field roles (RN/LPN/Med Tech/HHA/
+   Companion) auto-get a linked caregiver profile (ONBOARDING) so My Shifts works.
+   Invites expire in 14 days; pending invites are listed + revocable. Distinct from
+   /signup (which creates a NEW agency + owner). Demo link: /invite/demo-invite-hha
+✅ SYSTEM SUPER ADMIN (Platform Owner) — superadmin@curasera.com / password123.
+   DEFAULT LANDING = System Monitor (/dashboard/platform), never a single agency.
+   A non-impersonating platform owner gets a platform-level shell (neutral branding,
+   full nav) and is redirected off /dashboard to the monitor. The monitor shows
+   system health (agencies active/suspended/trialing, users, patients, visits) and
+   oversees EVERY agency: provision a new agency + owner, suspend/reactivate, change
+   plan, and "View as" any tenant (acting-agency cookie makes the whole app operate
+   on it; violet banner to exit back to the monitor). Only place that crosses tenants.
+✅ Medication administration restricted to MED TECH / LPN / RN (new meds:* capability
+   + new MED_TECH role); HHA/CNA/Companion aides cannot give meds. medtech@curasera.com seeded.
+✅ Patient records editable only by Owner / Admin / Clinical Director (admissions);
+   everyone else (incl. Nurse Supervisor) is read-only on patients.
+✅ Financials (revenue, A/R, payroll, est. profitability) = Agency Owner + Billing ONLY;
+   Administrator and HR no longer have billing/payroll. Profitability card on dashboard.
+✅ Registration now requires: caregiver = skills + available hours + days available;
+   patient = needed hours/week + days available.
+✅ Change requests need 24–48h notice: patients AND caregivers can request shift changes
+   when the visit is ≥24h away; inside 48h only senior staff apply. Caregiver "Request
+   change" on My Shifts → scheduler approval re-opens the shift to the marketplace.
+✅ Renamed the generic "Caregiver" role label to "Companion".
+✅ Email: real Resend delivery (RESEND_API_KEY) with per-agency from-name; dev logs a link.
+✅ Encryption: per-agency integration API keys stored AES-256-GCM encrypted, never
+   returned to the client (Config Center → Integrations shows "Saved (encrypted)").
+
+PRIOR ROUND:
 ✅ Scheduling permission lockdown: Scheduling + Visits are visible ONLY to
    scheduler-and-up (Owner / Admin / Clinical Director / Nurse Supervisor /
    Scheduler). Field staff (RN/LPN/HHA/CNA/Caregiver) no longer have

@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Prisma } from "@prisma/client";
-import { requireUser, hasCapability, patientAssignmentScoped, seesAllBranches } from "@/lib/authz";
+import { requireUser, can as hasCap, patientAssignmentScoped, seesAllBranches, type Capability } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
+import { resources } from "@/lib/resources";
 import { logAdmin } from "@/lib/audit";
 import { CrudResource, type CrudConfig } from "@/components/CrudResource";
 import { childDefs, resourceDefs } from "@/components/resource-defs";
@@ -17,11 +18,14 @@ const STATUS_TONE: Record<string, string> = {
   ACTIVE: "green", PENDING: "amber", ON_HOLD: "amber", DISCHARGED: "neutral", DECEASED: "neutral",
 };
 
-function Panel({ cfg, fixed }: { cfg: CrudConfig; fixed: Record<string, string> }) {
+function Panel({ cfg, fixed, can }: { cfg: CrudConfig; fixed: Record<string, string>; can: (c: Capability) => boolean }) {
+  // Hide Add/Edit/Delete when the viewer lacks this resource's write capability.
+  const writeCap = (resources as Record<string, { writeCap?: Capability }>)[cfg.resource]?.writeCap;
+  const readOnly = cfg.readOnly || (writeCap ? !can(writeCap) : false);
   return (
     <section>
       <h2 className="mb-2 mt-2 text-base font-semibold text-surface-800">{cfg.title}</h2>
-      <CrudResource {...cfg} embedded fixed={fixed} />
+      <CrudResource {...cfg} embedded fixed={fixed} readOnly={readOnly} />
     </section>
   );
 }
@@ -42,11 +46,11 @@ export default async function PatientDetail({ params }: { params: { id: string }
 
   // Audit-on-view (sensitive read).
   await logAdmin(ctx, { action: "patient.view", target: p.id });
-  if (hasCapability(ctx.role, "clinical:read")) {
+  if (hasCap(ctx, "clinical:read")) {
     await logAdmin(ctx, { action: "patient.medical.view", target: p.id });
   }
 
-  const can = (cap: Parameters<typeof hasCapability>[1]) => hasCapability(ctx.role, cap);
+  const can = (cap: Capability) => hasCap(ctx, cap);
   const fixed = { patientId: p.id };
   const info: [string, string][] = [
     ["MRN", p.mrn ?? "—"],
@@ -90,27 +94,27 @@ export default async function PatientDetail({ params }: { params: { id: string }
 
       {/* Care-safety data (visible to caregivers) */}
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        {can("patients:read") && <Panel cfg={childDefs["emergency-contacts"]} fixed={fixed} />}
-        {can("patients:read") && <Panel cfg={childDefs.allergies} fixed={fixed} />}
-        {can("care:read") && <Panel cfg={resourceDefs["care-tasks"]} fixed={fixed} />}
-        {can("care:read") && <Panel cfg={resourceDefs["med-logs"]} fixed={fixed} />}
+        {can("patients:read") && <Panel cfg={childDefs["emergency-contacts"]} fixed={fixed} can={can} />}
+        {can("patients:read") && <Panel cfg={childDefs.allergies} fixed={fixed} can={can} />}
+        {can("care:read") && <Panel cfg={resourceDefs["care-tasks"]} fixed={fixed} can={can} />}
+        {can("meds:read") && <Panel cfg={resourceDefs["med-logs"]} fixed={fixed} can={can} />}
       </div>
 
       {/* Clinical (Level-2) data — clinical roles only */}
       {can("clinical:read") && (
         <div className="mt-6 grid gap-6 lg:grid-cols-2">
-          <Panel cfg={childDefs.diagnoses} fixed={fixed} />
-          <Panel cfg={childDefs.medications} fixed={fixed} />
-          <Panel cfg={childDefs.physicians} fixed={fixed} />
-          <Panel cfg={resourceDefs["service-auths"]} fixed={fixed} />
+          <Panel cfg={childDefs.diagnoses} fixed={fixed} can={can} />
+          <Panel cfg={childDefs.medications} fixed={fixed} can={can} />
+          <Panel cfg={childDefs.physicians} fixed={fixed} can={can} />
+          <Panel cfg={resourceDefs["service-auths"]} fixed={fixed} can={can} />
         </div>
       )}
 
       <div className="mt-6 space-y-6">
-        {can("clinical:read") && <Panel cfg={resourceDefs["care-plans"]} fixed={fixed} />}
-        {can("care:read") && <Panel cfg={resourceDefs["visit-notes"]} fixed={fixed} />}
-        {can("billing:read") && <Panel cfg={childDefs.insurance} fixed={fixed} />}
-        {can("documents:read") && <Panel cfg={resourceDefs.documents} fixed={fixed} />}
+        {can("clinical:read") && <Panel cfg={resourceDefs["care-plans"]} fixed={fixed} can={can} />}
+        {can("care:read") && <Panel cfg={resourceDefs["visit-notes"]} fixed={fixed} can={can} />}
+        {can("billing:read") && <Panel cfg={childDefs.insurance} fixed={fixed} can={can} />}
+        {can("documents:read") && <Panel cfg={resourceDefs.documents} fixed={fixed} can={can} />}
         {can("patients:write") && <FamilyAccess basePath={`/api/patients/${p.id}/family`} title="Family Access" />}
       </div>
     </div>
