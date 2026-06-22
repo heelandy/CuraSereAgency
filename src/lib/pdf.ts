@@ -108,8 +108,11 @@ export function buildReportPdf(opts: {
   subtitle?: string;
   meta?: Record<string, string>;
   sections?: { heading: string; lines: string[] }[];
+  brandName?: string; // agency name shown in the title banner (white-label)
+  footer?: string; // agency-specific footer line (white-label)
 }): Uint8Array {
   const lines: string[] = [];
+  if (opts.brandName) lines.push(opts.brandName.toUpperCase());
   lines.push(opts.title.toUpperCase());
   if (opts.subtitle) lines.push(opts.subtitle);
   lines.push("=".repeat(60));
@@ -124,6 +127,6 @@ export function buildReportPdf(opts: {
     for (const l of section.lines) lines.push(l);
   }
   lines.push("");
-  lines.push(`Generated ${new Date().toISOString()} — Cura_Sera HHCOS`);
+  lines.push(opts.footer ?? `Generated ${new Date().toISOString()} — Cura_Sera HHCOS`);
   return buildTextPdf(lines);
 }

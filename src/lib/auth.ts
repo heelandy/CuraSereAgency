@@ -3,6 +3,8 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { prisma } from "./prisma";
 import { config } from "./config";
+import { verifyToken } from "./totp";
+import { decryptField } from "./crypto";
 
 // NextAuth (credentials + JWT). Role/agency are stamped into the JWT at sign-in;
 // authz.requireUser() re-reads them from the DB every request for live revocation.
@@ -16,6 +18,7 @@ export const authOptions: NextAuthOptions = {
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
+        totp: { label: "Authenticator code", type: "text" },
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
@@ -26,6 +29,10 @@ export const authOptions: NextAuthOptions = {
         if (!user) return null;
         const ok = await bcrypt.compare(credentials.password, user.passwordHash);
         if (!ok) return null;
+        // Enforce TOTP 2FA when enabled for this user.
+        if (user.twoFactorEnabled && user.twoFactorSecret) {
+          if (!verifyToken(decryptField(user.twoFactorSecret) ?? "", credentials.totp ?? "")) return null;
+        }
         await prisma.user.update({
           where: { id: user.id },
           data: { lastLoginAt: new Date() },

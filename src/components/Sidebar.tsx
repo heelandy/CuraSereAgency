@@ -9,7 +9,7 @@ import { Logo } from "./ui";
 import {
   HomeIcon, ChartIcon, UserIcon, UsersIcon, CalendarIcon, MapPinIcon,
   ClipboardIcon, ShieldIcon, FileIcon, RouteIcon, BuildingIcon, DollarIcon,
-  HeartIcon, ChatIcon, BellIcon, SparkIcon, GearIcon, LogoutIcon, initialsBadge,
+  HeartIcon, ChatIcon, BellIcon, SparkIcon, GearIcon, LogoutIcon, PillIcon, ClockIcon, initialsBadge,
 } from "./icon-map";
 
 const ICONS: Record<string, (p: { width?: number; height?: number }) => JSX.Element> = {
@@ -17,17 +17,19 @@ const ICONS: Record<string, (p: { width?: number; height?: number }) => JSX.Elem
   calendar: CalendarIcon, mappin: MapPinIcon, clipboard: ClipboardIcon,
   shield: ShieldIcon, file: FileIcon, route: RouteIcon, building: BuildingIcon,
   dollar: DollarIcon, heart: HeartIcon, chat: ChatIcon, bell: BellIcon,
-  spark: SparkIcon, gear: GearIcon,
+  spark: SparkIcon, gear: GearIcon, pill: PillIcon, clock: ClockIcon,
 };
 
 export function Sidebar({
-  groups, user,
+  groups, user, brand,
 }: {
   groups: NavGroup[];
   user: { name: string; roleLabel: string; agencyName: string };
+  brand?: { name: string; logoUrl: string | null };
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const logo = <Logo name={brand?.name} logoUrl={brand?.logoUrl ?? null} />;
 
   const isActive = (href: string) =>
     href === "/dashboard" ? pathname === href : pathname.startsWith(href);
@@ -36,7 +38,7 @@ export function Sidebar({
     <>
       {/* Mobile top bar */}
       <div className="sticky top-0 z-40 flex items-center justify-between border-b border-surface-200 bg-white px-4 py-3 md:hidden">
-        <Logo />
+        {logo}
         <button className="btn-secondary btn-sm" onClick={() => setOpen((v) => !v)}>Menu</button>
       </div>
 
@@ -46,7 +48,7 @@ export function Sidebar({
         }`}
       >
         <div className="flex items-center justify-between border-b border-surface-200 px-4 py-4">
-          <Link href="/dashboard" onClick={() => setOpen(false)}><Logo /></Link>
+          <Link href="/dashboard" onClick={() => setOpen(false)}>{logo}</Link>
         </div>
 
         <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4">

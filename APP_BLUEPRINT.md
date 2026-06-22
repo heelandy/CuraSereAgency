@@ -216,3 +216,145 @@ folder→role mapping (frontend / backend / database) even though it deploys as 
 6. (Optional) add the org/multi-tenant oversight layer mirroring §5.3.
 7. Set the `brand` palette + `globals.css` classes to your brand.
 8. Wire deployment per §13; keep the verify workflow per §14.
+
+---
+
+## 16. Proven extensions (battle-tested in a full build)
+
+These patterns were validated building a large multi-tenant SaaS on top of the core.
+They are domain-agnostic — reuse them directly.
+
+### 16.1 One dynamic route instead of two files per resource
+Replace per-resource `route.ts` files with a single dispatcher keyed by a central
+registry, so adding a resource never touches routing:
+
+```
+src/lib/resources.ts            // const resources = { <slug>: ResourceConfig } satisfies Record<…>
+src/app/api/r/[resource]/route.ts        // GET/POST  → collection(resources[params.resource])
+src/app/api/r/[resource]/[id]/route.ts   // GET/PATCH/DELETE → item(resources[params.resource])
+```
+A page is then `<CrudResource {...resourceDefs[slug]} />`, and a generic
+`/dashboard/[resource]/page.tsx` can render *any* registered resource. Adding a
+feature = schema + `ResourceConfig` + declarative column/field defs + a nav entry.
+
+### 16.2 Extend `ResourceConfig` with composable hooks
+The factory stays generic by accepting optional hooks; each new requirement is a
+field on the config, never a new controller:
+- `scope`: `{mode:'agency'}` (has tenant FK) **or** `{mode:'parent', relation, fkField, parentDelegate}`
+  for child rows scoped through an agency-owned parent (IDOR-safe, no tenant FK needed).
+- `listWhere(ctx)`: extra row filters — the seam for **row-level isolation**
+  (e.g. assignment-scoping: `{ visits: { some: { caregiver: { userId: ctx.userId } } } }`).
+- `branchField`: scalar column name → branch isolation applied automatically for
+  branch-bound roles (`!seesAllBranches(role) && ctx.branchId`).
+- `validate(data, ctx, mode, existing?)`: async business rules (auth/eligibility,
+  time-window locks). `existing` enables compare-against-current rules.
+- `transform(data, ctx)` / `stamp(ctx)`: derive fields / inject author+tenant ids.
+- `encryptFields: string[]`: transparent at-rest field encryption (see §16.3).
+- `auditView: true`: log sensitive reads on item GET.
+- `limit`: per-tenant row cap for plan gating.
+
+### 16.4 Multi-layer access control (defense in depth)
+Stack these so the backend — never the frontend — decides what's allowed:
+1. **Capability tiers**, not just resource:action. Split sensitive data into tiers
+   (`care:*` vs `clinical:*` vs `billing:*`) and map roles accordingly, so a
+   field worker sees safety data but not full medical/financial records. Re-cap
+   the resource configs; gate detail-page panels with `hasCapability(role, cap)`.
+2. **Tenant scope** (always) → **branch scope** (`branchField` + agency-wide role
+   allowlist) → **assignment scope** (`listWhere` relation filter) → applied on
+   list **and** item/detail reads.
+3. **Audit-on-view** for sensitive reads; **append-only** audit + security logs.
+Keep tiny pure helpers (`seesAllBranches(role)`, `assignmentScoped(role)`) and
+unit-test the capability map + helpers — they're the security contract.
+
+### 16.3 Field encryption at rest (zero-dep)
+`lib/crypto.ts`: AES-256-GCM, key from `ENCRYPTION_KEY` (base64-32 or passphrase;
+dev fallback derived from `NEXTAUTH_SECRET`). `encryptField`/`decryptField` use a
+`enc:v1:` prefix so legacy plaintext passes through unchanged (safe rollout). The
+factory encrypts `encryptFields` on write and decrypts on read; secrets (TOTP)
+encrypt/decrypt at their call sites.
+
+### 16.5 Per-tenant feature flags + white-label config center
+- Store flags as a JSON column on the tenant; `parseFlags()` defaults everything
+  **on** unless explicitly off. Map nav hrefs → feature keys and filter nav by
+  `(capability OK) && (feature enabled)`.
+- White-label = tenant columns (`portalName`, `logoUrl`, `primaryColor`) read in
+  the layout; pass to a brand-aware `<Logo>`; inject `--agency-accent` via a
+  `<style>` tag. "One codebase, configured per tenant."
+- A **Configuration Center** page bundles branding + flags + a service catalog +
+  config (pay period, rates) + links to forms/integrations — all plain config,
+  no per-tenant code.
+
+### 16.6 Auth hardening you can lift directly
+- **TOTP 2FA** (`lib/totp.ts`, RFC-6238, zero-dep): enroll → verify → store secret
+  **encrypted**; the credentials `authorize()` requires the code when enabled.
+- **Email verification + resend** via a provider-agnostic `lib/mail.ts`
+  (`mailConfigured` gate): dev logs/returns the link, prod wires Resend/SMTP. Same
+  abstraction serves invites and notifications.
+- **Force-logout** by bumping `tokenVersion`; re-read it every request in `requireUser`.
+
+### 16.7 Portal + request→approve workflow
+External users (customer/family) never mutate operational data directly: they
+submit a typed **request** (`status: PENDING|APPROVED|DECLINED`) that staff review;
+approval applies the change (e.g. an open-shift *claim* approval assigns the worker).
+Sub-accounts (family) are created **only under** their parent record. Resolve the
+"current user's record" with small server helpers (`portalPatientId(ctx)`,
+`workerForUser(ctx)`) that back self-service endpoints (`/api/<role>/summary`,
+`/api/<role>/shifts`) returning **only that user's** data.
+
+### 16.8 In-app notifications + marketplace
+A `Notification` model + a `/api/notifications` (list + mark-read) + a polling bell
+gives real-time-ish delivery with no extra infra. A "marketplace" (open work items
+visible with **redacted** detail until claimed+approved) reuses the request model.
+
+### 16.9 What to keep as config, not code (multi-tenant SaaS)
+Branding, services offered, enabled features, pay/PTO/compliance rules, forms, and
+integration connections are **tenant configuration rows**, never branches in code.
+One codebase → many tenants, each a different experience. Keep secrets env-only;
+integration *connection* toggles can live in the DB, credentials cannot.
+
+### 16.10 Capability removal is the cheapest, deepest visibility fix
+When a role should lose a whole surface (e.g. field staff must not see the
+schedule or assign work), **remove the capability**, don't hide UI. One coarse
+cap (`scheduling:read`) drives the nav filter *and* the resource factory's read
+guard, so dropping it from a role cascades to the sidebar, the list API, and any
+detail route at once. Give that role a **purpose-built self-service surface**
+instead (a "My X" page backed by `/api/<role>/*` endpoints that return only
+their own rows), and guard sensitive pages server-side with `requireCap` too —
+the API is the real gate, the page guard stops direct URL access. Audit
+single-action endpoints separately: an action cap (`evv:write`) is not the same
+as ownership — also assert the target row belongs to the actor
+(`row.workerId === workerForUser(ctx).id`) for assignment-scoped roles.
+
+### 16.11 Participant-scoped messaging with a sender→recipient policy
+Make conversations private by membership, not by tenant: a `ConversationParticipant`
+join (`conversationId,userId`) scopes list/read/post to members, while an
+oversight cap (`admin:manage`) sees all. Encode "who may talk to whom" as a pure
+function `canMessage(senderRole, recipientRole)` and enforce it at **conversation
+create** (validate every recipient) *and* surface it through a
+`/messages/recipients` endpoint so the compose UI only ever offers allowed
+targets. Frontend filtering is convenience; the create-time check is the rule.
+
+### 16.13 Runtime white-label (customize data, not code)
+True multi-tenant branding is resolved **per request from the host**, never
+compiled in. Priority: **custom domain** (an `AgencyDomain` row, `domain` unique)
+→ **platform subdomain** (`Agency.slug`, e.g. `acme.yourplatform.com`) →
+**logged-in user's agency** → **platform default**. Public pages (login/signup)
+brand by host; authenticated shells brand by the user's own agency (so visuals
+match their data — never cross-tenant). Make the whole theme reskin from **one
+color**: define the Tailwind `brand` scale as CSS-variable channels
+(`rgb(var(--brand-600) / <alpha-value>)`) with defaults in `:root`, then a tiny
+server `<BrandStyle>` emits a `:root{…}` override generated from the agency's
+primary hex (lighten-toward-white / darken-toward-black ramp) plus favicon and
+optional custom CSS. Everything else (portal name, logo, login banner, support
+info, PDF footer) is just agency columns read at render. Result: one codebase,
+one deploy, thousands of agencies each "having their own software." The admin
+panel edits these rows (branding + domains); no developer, no redeploy.
+
+### 16.12 Self-serve tenant signup (new tenant + its owner)
+A public signup that provisions a **new tenant** and makes the registrant its
+**owner** is one transaction: create the agency (+ a default branch), hash the
+password, create the user with the role **fixed server-side** (never trust a
+client-supplied role), stamp an email-verify token, send mail (dev returns the
+link). Keep credential login deterministic by rejecting an email that already
+exists in any tenant. Staff are then invited from inside the tenant — signup is
+owner-only; joining an existing tenant is a separate invite flow.

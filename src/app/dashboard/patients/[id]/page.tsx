@@ -1,9 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { requireUser } from "@/lib/authz";
+import { Prisma } from "@prisma/client";
+import { requireUser, hasCapability, patientAssignmentScoped, seesAllBranches } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
+import { logAdmin } from "@/lib/audit";
 import { CrudResource, type CrudConfig } from "@/components/CrudResource";
 import { childDefs, resourceDefs } from "@/components/resource-defs";
+import { FamilyAccess } from "@/components/FamilyAccess";
 import { Badge } from "@/components/ui";
 import { fmtDate, fullName } from "@/lib/format";
 import { PATIENT_STATUS } from "@/lib/enums";
@@ -25,9 +28,25 @@ function Panel({ cfg, fixed }: { cfg: CrudConfig; fixed: Record<string, string> 
 
 export default async function PatientDetail({ params }: { params: { id: string } }) {
   const ctx = await requireUser();
-  const p = await prisma.patient.findFirst({ where: { id: params.id, agencyId: ctx.agencyId } });
+
+  // Isolation: assignment-scoped roles can only open patients they're assigned to;
+  // other branch-bound roles only within their branch.
+  const where: Prisma.PatientWhereInput = { id: params.id, agencyId: ctx.agencyId };
+  if (patientAssignmentScoped(ctx.role)) {
+    where.visits = { some: { caregiver: { userId: ctx.userId } } };
+  } else if (!seesAllBranches(ctx.role) && ctx.branchId) {
+    where.branchId = ctx.branchId;
+  }
+  const p = await prisma.patient.findFirst({ where });
   if (!p) notFound();
 
+  // Audit-on-view (sensitive read).
+  await logAdmin(ctx, { action: "patient.view", target: p.id });
+  if (hasCapability(ctx.role, "clinical:read")) {
+    await logAdmin(ctx, { action: "patient.medical.view", target: p.id });
+  }
+
+  const can = (cap: Parameters<typeof hasCapability>[1]) => hasCapability(ctx.role, cap);
   const fixed = { patientId: p.id };
   const info: [string, string][] = [
     ["MRN", p.mrn ?? "—"],
@@ -69,20 +88,30 @@ export default async function PatientDetail({ params }: { params: { id: string }
         {p.notes && <p className="mt-4 rounded-xl bg-surface-50 p-3 text-sm text-surface-600">{p.notes}</p>}
       </div>
 
+      {/* Care-safety data (visible to caregivers) */}
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
-        <Panel cfg={childDefs["emergency-contacts"]} fixed={fixed} />
-        <Panel cfg={childDefs.insurance} fixed={fixed} />
-        <Panel cfg={childDefs.diagnoses} fixed={fixed} />
-        <Panel cfg={childDefs.allergies} fixed={fixed} />
-        <Panel cfg={childDefs.medications} fixed={fixed} />
-        <Panel cfg={childDefs.physicians} fixed={fixed} />
+        {can("patients:read") && <Panel cfg={childDefs["emergency-contacts"]} fixed={fixed} />}
+        {can("patients:read") && <Panel cfg={childDefs.allergies} fixed={fixed} />}
+        {can("care:read") && <Panel cfg={resourceDefs["care-tasks"]} fixed={fixed} />}
+        {can("care:read") && <Panel cfg={resourceDefs["med-logs"]} fixed={fixed} />}
       </div>
 
+      {/* Clinical (Level-2) data — clinical roles only */}
+      {can("clinical:read") && (
+        <div className="mt-6 grid gap-6 lg:grid-cols-2">
+          <Panel cfg={childDefs.diagnoses} fixed={fixed} />
+          <Panel cfg={childDefs.medications} fixed={fixed} />
+          <Panel cfg={childDefs.physicians} fixed={fixed} />
+          <Panel cfg={resourceDefs["service-auths"]} fixed={fixed} />
+        </div>
+      )}
+
       <div className="mt-6 space-y-6">
-        <Panel cfg={resourceDefs["care-plans"]} fixed={fixed} />
-        <Panel cfg={resourceDefs["service-auths"]} fixed={fixed} />
-        <Panel cfg={resourceDefs["visit-notes"]} fixed={fixed} />
-        <Panel cfg={resourceDefs.documents} fixed={fixed} />
+        {can("clinical:read") && <Panel cfg={resourceDefs["care-plans"]} fixed={fixed} />}
+        {can("care:read") && <Panel cfg={resourceDefs["visit-notes"]} fixed={fixed} />}
+        {can("billing:read") && <Panel cfg={childDefs.insurance} fixed={fixed} />}
+        {can("documents:read") && <Panel cfg={resourceDefs.documents} fixed={fixed} />}
+        {can("patients:write") && <FamilyAccess basePath={`/api/patients/${p.id}/family`} title="Family Access" />}
       </div>
     </div>
   );

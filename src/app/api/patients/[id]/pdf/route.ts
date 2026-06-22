@@ -10,17 +10,27 @@ export const dynamic = "force-dynamic";
 export function GET(_req: Request, { params }: { params: { id: string } }) {
   return handle(async () => {
     const ctx = await requireCap("patients:read");
-    const p = await prisma.patient.findFirst({
-      where: { id: params.id, agencyId: ctx.agencyId },
-      include: {
-        diagnoses: true, allergies: true, medications: true,
-        emergencyContacts: true, physicians: true, insurancePolicies: true,
-        carePlans: { include: { goals: true } },
-      },
-    });
+    const [p, agency] = await Promise.all([
+      prisma.patient.findFirst({
+        where: { id: params.id, agencyId: ctx.agencyId },
+        include: {
+          diagnoses: true, allergies: true, medications: true,
+          emergencyContacts: true, physicians: true, insurancePolicies: true,
+          carePlans: { include: { goals: true } },
+        },
+      }),
+      prisma.agency.findUnique({ where: { id: ctx.agencyId }, select: { name: true, portalName: true, pdfFooter: true, supportEmail: true, supportPhone: true } }),
+    ]);
     if (!p) throw Errors.notFound();
 
+    const brandName = agency?.portalName || agency?.name || undefined;
+    const footer = agency?.pdfFooter
+      || [brandName, agency?.supportEmail, agency?.supportPhone].filter(Boolean).join(" · ")
+      || undefined;
+
     const pdf = buildReportPdf({
+      brandName,
+      footer,
       title: `Patient Summary — ${fullName(p)}`,
       subtitle: p.mrn ? `MRN ${p.mrn}` : undefined,
       meta: {

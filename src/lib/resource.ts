@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { prisma } from "./prisma";
 import { handle, json, Errors } from "./http";
-import { requireUser, requireCapability, type Capability, type Ctx } from "./authz";
+import { requireUser, requireCapability, seesAllBranches, type Capability, type Ctx } from "./authz";
 import { mutationGuard, RateLimits } from "./rate-limit";
 import { logAdmin } from "./audit";
+import { encryptField, decryptField } from "./crypto";
 
 // Generic CRUD factory (APP_BLUEPRINT §6). A config becomes REST handlers that
 // are ALWAYS tenant-scoped (IDOR-safe), capability-gated, Zod-validated, and
@@ -37,8 +38,38 @@ export interface ResourceConfig {
   listWhere?: (ctx: Ctx) => Record<string, unknown>;
   /** Derive computed fields on create/edit. */
   transform?: (data: Record<string, unknown>, ctx: Ctx) => Record<string, unknown>;
-  /** Async business-rule guard run before create/update (e.g. service-auth engine). */
-  validate?: (data: Record<string, unknown>, ctx: Ctx, mode: "create" | "update") => Promise<void>;
+  /** Async business-rule guard run before create/update (e.g. service-auth engine).
+   *  `existing` is the current row (update only) for rules that compare against it. */
+  validate?: (
+    data: Record<string, unknown>,
+    ctx: Ctx,
+    mode: "create" | "update",
+    existing?: Record<string, unknown>,
+  ) => Promise<void>;
+  /** Fields encrypted at rest (AES-256-GCM) — encrypted on write, decrypted on read. */
+  encryptFields?: string[];
+  /** Scalar branch column for branch isolation (branch-bound roles see only their branch). */
+  branchField?: string;
+  /** Log a sensitive read on item GET (audit-on-view). */
+  auditView?: boolean;
+}
+
+function encryptData(cfg: ResourceConfig, data: Record<string, unknown>) {
+  if (!cfg.encryptFields) return data;
+  for (const f of cfg.encryptFields) {
+    if (typeof data[f] === "string" && data[f]) data[f] = encryptField(data[f] as string);
+  }
+  return data;
+}
+
+function decryptRow<T extends Record<string, unknown> | null>(cfg: ResourceConfig, row: T): T {
+  if (!cfg.encryptFields || !row) return row;
+  for (const f of cfg.encryptFields) {
+    if (typeof (row as Record<string, unknown>)[f] === "string") {
+      (row as Record<string, unknown>)[f] = decryptField((row as Record<string, unknown>)[f] as string);
+    }
+  }
+  return row;
 }
 
 type IdParams = { params: { id: string } };
@@ -52,7 +83,12 @@ function baseWhere(cfg: ResourceConfig, ctx: Ctx, extra: Record<string, unknown>
   const scope = cfg.scope ?? { mode: "agency" };
   const listWhere = cfg.listWhere?.(ctx) ?? {};
   if (scope.mode === "agency") {
-    return { agencyId: ctx.agencyId, ...listWhere, ...extra };
+    const where: Record<string, unknown> = { agencyId: ctx.agencyId, ...listWhere, ...extra };
+    // Branch isolation: branch-bound roles only see their own branch.
+    if (cfg.branchField && !seesAllBranches(ctx.role) && ctx.branchId) {
+      where[cfg.branchField] = ctx.branchId;
+    }
+    return where;
   }
   // parent mode: scope via the parent's agencyId
   return { [scope.relation]: { agencyId: ctx.agencyId }, ...listWhere, ...extra };
@@ -113,6 +149,7 @@ export function collection(cfg: ResourceConfig) {
             JSON.stringify(r).toLowerCase().includes(needle),
           );
         }
+        if (cfg.encryptFields) rows = rows.map((r: Record<string, unknown>) => decryptRow(cfg, r));
         return json(rows);
       }),
 
@@ -140,6 +177,7 @@ export function collection(cfg: ResourceConfig) {
         if (cfg.stamp) data = { ...data, ...cfg.stamp(ctx) };
         if (cfg.transform) data = cfg.transform(data, ctx);
         if (cfg.validate) await cfg.validate(data, ctx, "create");
+        data = encryptData(cfg, data);
 
         const created = await model(cfg.delegate).create({ data });
         await logAdmin(ctx, { action: `${cfg.delegate}.create`, target: created.id });
@@ -165,7 +203,8 @@ export function item(cfg: ResourceConfig) {
           include: cfg.include,
         });
         if (!row) throw Errors.notFound();
-        return json(row);
+        if (cfg.auditView) await logAdmin(ctx, { action: `${cfg.delegate}.view`, target: params.id });
+        return json(decryptRow(cfg, row));
       }),
 
     PATCH: (req: Request, { params }: IdParams) =>
@@ -173,7 +212,7 @@ export function item(cfg: ResourceConfig) {
         const ctx = await requireUser();
         requireCapability(ctx, cfg.writeCap);
         mutationGuard(req, cfg.rateScope, ctx.userId, RateLimits.write);
-        await findOwned(ctx, params.id);
+        const existing = await findOwned(ctx, params.id);
 
         const body = await req.json().catch(() => ({}));
         let data = cfg.schema.partial().parse(body) as Record<string, unknown>;
@@ -181,7 +220,8 @@ export function item(cfg: ResourceConfig) {
         delete data.agencyId;
         await assertOptionalFks(cfg, ctx, data);
         if (cfg.transform) data = cfg.transform(data, ctx);
-        if (cfg.validate) await cfg.validate(data, ctx, "update");
+        if (cfg.validate) await cfg.validate(data, ctx, "update", existing);
+        data = encryptData(cfg, data);
 
         const updated = await model(cfg.delegate).update({ where: { id: params.id }, data });
         await logAdmin(ctx, { action: `${cfg.delegate}.update`, target: params.id });

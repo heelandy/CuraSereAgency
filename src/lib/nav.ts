@@ -1,6 +1,7 @@
 import type { Capability } from "./authz";
 import { hasCapability } from "./authz";
 import type { Role } from "./enums";
+import { NAV_FEATURE, featureEnabled, type FlagMap } from "./features";
 
 // Navigation model (data only; icon is a string key resolved in the Sidebar so
 // the filtered nav stays serializable across the server→client boundary).
@@ -22,10 +23,17 @@ export const NAV: NavGroup[] = [
       { label: "Caregivers", href: "/dashboard/caregivers", icon: "users", caps: ["caregivers:read"] },
       { label: "Scheduling", href: "/dashboard/scheduling", icon: "calendar", caps: ["scheduling:read"] },
       { label: "Visits", href: "/dashboard/visits", icon: "calendar", caps: ["scheduling:read"] },
-      { label: "EVV", href: "/dashboard/evv", icon: "mappin", caps: ["evv:write"] },
-      { label: "Visit Notes", href: "/dashboard/visit-notes", icon: "clipboard", caps: ["clinical:read"] },
+      { label: "My Shifts", href: "/dashboard/my-shifts", icon: "calendar", caps: ["evv:write"] },
+      { label: "My Time & Pay", href: "/dashboard/my-time", icon: "clock", caps: ["evv:write"] },
+      { label: "Requests", href: "/dashboard/requests", icon: "bell", caps: ["scheduling:read"] },
+      // EVV monitoring board (all of today's visits) is a supervisor view; field
+      // staff check in/out of their own shifts from "My Shifts" instead.
+      { label: "EVV", href: "/dashboard/evv", icon: "mappin", caps: ["scheduling:read"] },
+      { label: "Visit Notes", href: "/dashboard/visit-notes", icon: "clipboard", caps: ["care:read"] },
       { label: "Assessments", href: "/dashboard/assessments", icon: "clipboard", caps: ["clinical:read"] },
       { label: "Care Plans", href: "/dashboard/care-plans", icon: "clipboard", caps: ["clinical:read"] },
+      { label: "Care Tasks", href: "/dashboard/care-tasks", icon: "clipboard", caps: ["care:read"] },
+      { label: "Medications", href: "/dashboard/med-logs", icon: "pill", caps: ["meds:read"] },
       { label: "Incidents", href: "/dashboard/incidents", icon: "shield", caps: ["incidents:read"] },
     ],
   },
@@ -53,6 +61,9 @@ export const NAV: NavGroup[] = [
       { label: "Payments", href: "/dashboard/payments", icon: "dollar", caps: ["billing:read"] },
       { label: "Claims", href: "/dashboard/claims", icon: "dollar", caps: ["billing:read"] },
       { label: "Payroll", href: "/dashboard/payroll", icon: "dollar", caps: ["payroll:read"] },
+      { label: "Time Entries", href: "/dashboard/time-entries", icon: "clock", caps: ["payroll:read"] },
+      { label: "PTO", href: "/dashboard/pto", icon: "calendar", caps: ["payroll:read"] },
+      { label: "Mileage", href: "/dashboard/mileage", icon: "route", caps: ["payroll:read"] },
     ],
   },
   {
@@ -80,20 +91,27 @@ export const NAV: NavGroup[] = [
     label: "Administration",
     items: [
       { label: "Users & Roles", href: "/dashboard/admin/users", icon: "users", caps: ["admin:manage"] },
+      { label: "Configuration", href: "/dashboard/admin/config", icon: "gear", caps: ["admin:manage"] },
+      { label: "Forms Builder", href: "/dashboard/forms", icon: "file", caps: ["admin:manage"] },
+      { label: "Integrations", href: "/dashboard/admin/integrations", icon: "route", caps: ["admin:manage"] },
       { label: "Branches", href: "/dashboard/branches", icon: "building", caps: ["admin:manage"] },
       { label: "Departments", href: "/dashboard/departments", icon: "building", caps: ["admin:manage"] },
       { label: "Subscription", href: "/dashboard/admin/billing", icon: "dollar", caps: ["admin:manage"] },
+      { label: "Reports", href: "/dashboard/admin/reports", icon: "file", caps: ["admin:manage"] },
       { label: "Audit Logs", href: "/dashboard/admin/audit", icon: "shield", caps: ["audit:read"] },
       { label: "Settings", href: "/dashboard/admin/settings", icon: "gear", caps: ["admin:manage"] },
     ],
   },
 ];
 
-export function filterNav(role: Role): NavGroup[] {
+export function filterNav(role: Role, flags?: FlagMap): NavGroup[] {
   return NAV.map((group) => ({
     ...group,
-    items: group.items.filter(
-      (item) => !item.caps || item.caps.some((c) => hasCapability(role, c)),
-    ),
+    items: group.items.filter((item) => {
+      const capOk = !item.caps || item.caps.some((c) => hasCapability(role, c));
+      const feature = NAV_FEATURE[item.href];
+      const featureOk = !feature || !flags || featureEnabled(flags, feature);
+      return capOk && featureOk;
+    }),
   })).filter((group) => group.items.length > 0);
 }

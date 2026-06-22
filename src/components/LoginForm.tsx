@@ -10,6 +10,7 @@ export function LoginForm() {
   const callbackUrl = params.get("callbackUrl") || "/dashboard";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [totp, setTotp] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -17,7 +18,7 @@ export function LoginForm() {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const res = await signIn("credentials", { email, password, redirect: false, callbackUrl });
+    const res = await signIn("credentials", { email, password, totp, redirect: false, callbackUrl });
     setLoading(false);
     if (res?.error) {
       setError("Invalid email or password.");
@@ -47,6 +48,11 @@ export function LoginForm() {
         <input id="password" type="password" className="input" value={password}
           onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
       </div>
+      <div>
+        <label className="label" htmlFor="totp">Authenticator code <span className="text-surface-400">(if 2FA enabled)</span></label>
+        <input id="totp" type="text" inputMode="numeric" className="input" value={totp}
+          onChange={(e) => setTotp(e.target.value)} placeholder="123456" autoComplete="one-time-code" />
+      </div>
       <button type="submit" className="btn-primary w-full py-2.5" disabled={loading}>
         {loading ? "Signing in…" : "Sign in"}
       </button>
@@ -57,9 +63,14 @@ export function LoginForm() {
           {[
             ["Owner", "owner@curasera.com"],
             ["Scheduler", "scheduler@curasera.com"],
-            ["Nurse", "nurse@curasera.com"],
-            ["Caregiver", "caregiver@curasera.com"],
+            ["Nurse Sup.", "nurse@curasera.com"],
+            ["RN", "rn@curasera.com"],
+            ["LPN", "lpn@curasera.com"],
+            ["HHA", "hha@curasera.com"],
+            ["CNA", "cna@curasera.com"],
+            ["Billing", "billing@curasera.com"],
             ["Family", "family@curasera.com"],
+            ["Patient", "patient@curasera.com"],
           ].map(([label, e]) => (
             <button key={e} type="button" onClick={() => quickFill(e)}
               className="rounded-lg border border-surface-300 bg-white px-2 py-1 hover:bg-surface-100">

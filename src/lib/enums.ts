@@ -15,7 +15,8 @@ export const ROLE_LABELS = {
   SCHEDULER: "Scheduler",
   RN: "Registered Nurse",
   LPN: "Licensed Practical Nurse",
-  CAREGIVER: "Caregiver",
+  MED_TECH: "Medication Technician",
+  CAREGIVER: "Companion",
   HHA: "Home Health Aide",
   BILLING: "Billing Staff",
   HR: "HR Staff",
@@ -55,10 +56,15 @@ export const CAREGIVER_DISCIPLINE = {
   LPN: "Licensed Practical Nurse",
   CNA: "Certified Nursing Assistant",
   HHA: "Home Health Aide",
+  MED_TECH: "Medication Technician",
+  MEDICAL_ASSISTANT: "Medical Assistant",
   COMPANION: "Companion",
+  HOMEMAKER: "Homemaker",
   THERAPIST: "Therapist",
 } as const;
 export type CaregiverDiscipline = keyof typeof CAREGIVER_DISCIPLINE;
+
+export const GENDER = { FEMALE: "Female", MALE: "Male", OTHER: "Other" } as const;
 
 export const CAREGIVER_STATUS = {
   ACTIVE: "Active",
@@ -281,6 +287,105 @@ export const EMERGENCY_TYPE = {
   FACILITY_CLOSURE: "Facility Closure",
   PUBLIC_HEALTH: "Public Health Emergency",
 } as const;
+
+// ── Medication administration (Med Tech) ─────────────────────────────────────
+export const MED_LOG_STATUS = {
+  SCHEDULED: "Scheduled",
+  GIVEN: "Given",
+  MISSED: "Missed",
+  REFUSED: "Refused",
+  ERROR: "Error",
+} as const;
+
+// ── Care tasks ───────────────────────────────────────────────────────────────
+export const TIME_OF_DAY = {
+  MORNING: "Morning",
+  AFTERNOON: "Afternoon",
+  EVENING: "Evening",
+  ANYTIME: "Anytime",
+} as const;
+export const CARE_TASK_STATUS = {
+  PENDING: "Pending",
+  DONE: "Done",
+  SKIPPED: "Skipped",
+} as const;
+
+// ── Portal schedule requests (Phase 7) ───────────────────────────────────────
+export const REQUEST_TYPE = {
+  RESCHEDULE: "Reschedule visit",
+  CANCEL: "Cancel visit",
+  NEW_VISIT: "Request additional visit",
+  CAREGIVER_CHANGE: "Request a specific caregiver",
+  AVAILABILITY: "Change availability",
+  QUESTION: "Question",
+} as const;
+export const REQUEST_STATUS = {
+  PENDING: "Pending",
+  APPROVED: "Approved",
+  DECLINED: "Declined",
+} as const;
+// Caregiver-initiated request types (shift self-management / marketplace).
+export const CAREGIVER_REQUEST_TYPE = {
+  CLAIM: "Open-shift claim",
+  SWAP: "Shift swap",
+  DECLINE: "Decline shift",
+} as const;
+// Combined labels for display in the staff review screen.
+export const ALL_REQUEST_LABELS = { ...REQUEST_TYPE, ...CAREGIVER_REQUEST_TYPE } as const;
+
+// Schedule-change notice windows (spec): a patient/caregiver may request a change
+// only when the visit is at least MIN hours away; within NOTICE (48h) the change
+// can only be applied by senior staff. Net effect: requests land in the 24–48h
+// window for senior approval; inside 24h it's too late to self-serve.
+export const SELF_SERVICE_MIN_NOTICE_HOURS = 24;
+export const SELF_SERVICE_NOTICE_HOURS = 48;
+
+// ── Workforce: time entries / PTO / mileage ──────────────────────────────────
+export const TIME_ENTRY_TYPE = {
+  VISIT: "Visit", TRAINING: "Training", OFFICE: "Office", MEETING: "Meeting", TRAVEL: "Travel",
+} as const;
+export const TIME_ENTRY_STATUS = {
+  DRAFT: "Draft", SUBMITTED: "Submitted", PENDING: "Pending Review", APPROVED: "Approved",
+  REJECTED: "Rejected", ADJUSTED: "Adjusted", LOCKED: "Locked", EXPORTED: "Exported",
+} as const;
+export const PTO_TYPE = {
+  VACATION: "Vacation", SICK: "Sick", HOLIDAY: "Holiday", FLOATING: "Floating Holiday",
+} as const;
+export const PTO_STATUS = {
+  REQUESTED: "Requested", APPROVED: "Approved", DENIED: "Denied", USED: "Used", EXPIRED: "Expired",
+} as const;
+export const MILEAGE_TYPE = {
+  PATIENT_TO_PATIENT: "Patient to Patient", BRANCH_TO_PATIENT: "Branch to Patient",
+  TRAINING: "Training Travel", AGENCY: "Agency Travel",
+} as const;
+export const MILEAGE_STATUS = {
+  SUBMITTED: "Submitted", APPROVED: "Approved", REJECTED: "Rejected", PAID: "Paid",
+} as const;
+
+// ── Agency configuration / white label ───────────────────────────────────────
+export const EMPLOYMENT_TYPE = { W2: "W2 Employee", CONTRACTOR_1099: "1099 Contractor" } as const;
+export const PAY_PERIOD = { WEEKLY: "Weekly", BIWEEKLY: "Biweekly", SEMIMONTHLY: "Semi-Monthly", MONTHLY: "Monthly" } as const;
+export const FORM_CATEGORY = {
+  INTAKE: "Patient Intake", INCIDENT: "Incident Report", ASSESSMENT: "Assessment",
+  EVALUATION: "Employee Evaluation", CONSENT: "Consent", OTHER: "Other",
+} as const;
+export const INTEGRATION_PROVIDER = {
+  QUICKBOOKS: "QuickBooks", ADP: "ADP", GUSTO: "Gusto", PAYCHEX: "Paychex", STRIPE: "Stripe",
+  TWILIO: "Twilio (SMS)", DOCUSIGN: "DocuSign", GOOGLE: "Google Calendar", MICROSOFT: "Microsoft 365", ZOOM: "Zoom",
+} as const;
+
+// Per-agency feature flags (toggled in the Configuration Center).
+export const FEATURE_FLAGS = {
+  aiScheduling: "AI Scheduling",
+  openShiftMarketplace: "Open Shift Marketplace",
+  familyPortal: "Family Portal",
+  patientPortal: "Patient Portal",
+  mileageTracking: "Mileage Tracking",
+  complianceTracking: "Compliance Tracking",
+  advancedAnalytics: "Advanced Analytics",
+  whiteLabel: "White Label",
+} as const;
+export type FeatureKey = keyof typeof FEATURE_FLAGS;
 
 // ── AI modules (Phase 18/34) ─────────────────────────────────────────────────
 export const AI_MODULE = {

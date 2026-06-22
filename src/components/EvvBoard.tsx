@@ -10,6 +10,18 @@ type Visit = {
   evv?: { verification: string; checkInAt: string | null; checkOutAt: string | null } | null;
 };
 
+// EVV exception flags (late in / early out / missing checkout / wrong duration).
+function evvFlags(v: Visit): string[] {
+  const out: string[] = [];
+  const start = new Date(v.scheduledStart).getTime();
+  const end = new Date(v.scheduledEnd).getTime();
+  const tol = 15 * 60000;
+  if (v.evv?.checkInAt && new Date(v.evv.checkInAt).getTime() > start + tol) out.push("Late in");
+  if (v.evv?.checkOutAt && new Date(v.evv.checkOutAt).getTime() < end - tol) out.push("Early out");
+  if (v.status === "IN_PROGRESS" && Date.now() > end + tol) out.push("Missing out");
+  return out;
+}
+
 export function EvvBoard() {
   const [visits, setVisits] = useState<Visit[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,11 +55,18 @@ export function EvvBoard() {
   }
 
   async function act(visitId: string, action: "check-in" | "check-out") {
+    // Capture an e-signature on check-out (caregiver attestation).
+    let signatureName: string | undefined;
+    if (action === "check-out") {
+      const sig = window.prompt("Type your full name to sign and complete this visit:");
+      if (sig === null) return; // canceled
+      signatureName = sig.trim() || undefined;
+    }
     setBusy(visitId);
     const coords = await getCoords();
     await fetch(`/api/visits/${visitId}/evv`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, ...coords }),
+      body: JSON.stringify({ action, ...coords, signatureName }),
     });
     setBusy(null);
     await load();
@@ -69,9 +88,12 @@ export function EvvBoard() {
                 <td>{v.patient ? `${v.patient.firstName} ${v.patient.lastName}` : "—"}</td>
                 <td>{v.caregiver ? `${v.caregiver.firstName} ${v.caregiver.lastName}` : "—"}</td>
                 <td>
-                  {v.evv?.verification === "VERIFIED" ? <span className="badge-green">Verified</span>
-                    : v.evv?.checkInAt ? <span className="badge-violet">Checked in</span>
-                    : <span className="badge-neutral">Pending</span>}
+                  <div className="flex flex-wrap items-center gap-1">
+                    {v.evv?.verification === "VERIFIED" ? <span className="badge-green">Verified</span>
+                      : v.evv?.checkInAt ? <span className="badge-violet">Checked in</span>
+                      : <span className="badge-neutral">Pending</span>}
+                    {evvFlags(v).map((f) => <span key={f} className="badge-amber">{f}</span>)}
+                  </div>
                 </td>
                 <td><span className="badge-neutral">{v.status}</span></td>
                 <td className="text-right">

@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { requireUser } from "@/lib/authz";
+import { requireUser, hasCapability, seesAllBranches, patientAssignmentScoped } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
 import { StatCard, SectionCard, Badge, PageHeader } from "@/components/ui";
 import { UsersIcon, UserIcon, CalendarIcon, DollarIcon, ShieldIcon, HeartIcon } from "@/components/icons";
+import { CaregiverHome } from "@/components/CaregiverHome";
 import { fmtDateTime, fmtDate, fmtMoney, fullName, daysUntil } from "@/lib/format";
 import { VISIT_STATUS, INCIDENT_TYPE, SEVERITY } from "@/lib/enums";
 
@@ -10,24 +11,31 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardOverview() {
   const ctx = await requireUser();
+  // Field staff (caregivers/RN/LPN/HHA) get a personal, assignment-scoped home —
+  // never agency-wide patient/caregiver/visit figures.
+  if (patientAssignmentScoped(ctx.role)) return <CaregiverHome ctx={ctx} />;
   const agencyId = ctx.agencyId;
   const now = new Date();
   const startOfDay = new Date(now); startOfDay.setHours(0, 0, 0, 0);
   const endOfDay = new Date(now); endOfDay.setHours(23, 59, 59, 999);
   const in30 = new Date(now.getTime() + 30 * 86_400_000);
 
+  // Branch-bound roles see only their branch's figures (role/branch dashboards).
+  const bs = !seesAllBranches(ctx.role) && ctx.branchId ? { branchId: ctx.branchId } : {};
+  const vbs = !seesAllBranches(ctx.role) && ctx.branchId ? { patient: { branchId: ctx.branchId } } : {};
+
   const [
     patients, caregivers, visitsToday, openShifts, expiringCompliance, invoices,
     upcomingVisits, expiringItems, recentIncidents, announcements,
   ] = await Promise.all([
-    prisma.patient.count({ where: { agencyId, status: "ACTIVE" } }),
-    prisma.caregiver.count({ where: { agencyId, status: "ACTIVE" } }),
-    prisma.visit.count({ where: { agencyId, scheduledStart: { gte: startOfDay, lte: endOfDay } } }),
-    prisma.visit.count({ where: { agencyId, status: "OPEN" } }),
+    prisma.patient.count({ where: { agencyId, status: "ACTIVE", ...bs } }),
+    prisma.caregiver.count({ where: { agencyId, status: "ACTIVE", ...bs } }),
+    prisma.visit.count({ where: { agencyId, scheduledStart: { gte: startOfDay, lte: endOfDay }, ...vbs } }),
+    prisma.visit.count({ where: { agencyId, status: "OPEN", ...vbs } }),
     prisma.complianceItem.count({ where: { agencyId, OR: [{ status: "EXPIRING" }, { status: "EXPIRED" }, { expiresAt: { lte: in30 } }] } }),
     prisma.invoice.findMany({ where: { agencyId, status: { notIn: ["PAID", "VOID"] } }, select: { amount: true, amountPaid: true } }),
     prisma.visit.findMany({
-      where: { agencyId, scheduledStart: { gte: now } },
+      where: { agencyId, scheduledStart: { gte: now }, ...vbs },
       include: { patient: { select: { firstName: true, lastName: true } }, caregiver: { select: { firstName: true, lastName: true } } },
       orderBy: { scheduledStart: "asc" }, take: 6,
     }),
@@ -44,7 +52,27 @@ export default async function DashboardOverview() {
     prisma.announcement.findMany({ where: { agencyId }, orderBy: { createdAt: "desc" }, take: 3 }),
   ]);
 
+  // Role-aware "needs attention" counts.
+  const [pendingRequests, draftNotes, openApplicants] = await Promise.all([
+    prisma.scheduleRequest.count({ where: { agencyId, status: "PENDING" } }),
+    prisma.visitNote.count({ where: { agencyId, status: "DRAFT" } }),
+    prisma.applicant.count({ where: { agencyId, stage: { notIn: ["HIRED", "REJECTED"] } } }),
+  ]);
+  const attention = [
+    hasCapability(ctx.role, "scheduling:read") && pendingRequests > 0
+      ? { label: "Pending requests", value: pendingRequests, href: "/dashboard/requests", tone: "amber" as const }
+      : null,
+    hasCapability(ctx.role, "clinical:read") && draftNotes > 0
+      ? { label: "Unsigned visit notes", value: draftNotes, href: "/dashboard/visit-notes", tone: "blue" as const }
+      : null,
+    hasCapability(ctx.role, "hr:read") && openApplicants > 0
+      ? { label: "Applicants in pipeline", value: openApplicants, href: "/dashboard/applicants", tone: "violet" as const }
+      : null,
+  ].filter(Boolean) as { label: string; value: number; href: string; tone: "amber" | "blue" | "violet" }[];
+
   const ar = invoices.reduce((sum, i) => sum + (i.amount - i.amountPaid), 0);
+  // Outstanding A/R is financial-sensitive: only the agency owner and finance see it.
+  const canSeeAR = ["AGENCY_OWNER", "PLATFORM_OWNER", "BILLING"].includes(ctx.role);
 
   const visitTone: Record<string, string> = { SCHEDULED: "blue", OPEN: "amber", IN_PROGRESS: "violet", COMPLETED: "green", MISSED: "red", CANCELED: "neutral" };
   const sevTone: Record<string, string> = { LOW: "neutral", MODERATE: "amber", HIGH: "red", CRITICAL: "red" };
@@ -54,13 +82,25 @@ export default async function DashboardOverview() {
       <PageHeader title={`Welcome back, ${ctx.name.split(" ")[0]}`} subtitle="Your agency at a glance" />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        <StatCard label="Active Patients" value={patients} icon={<UserIcon />} tone="green" />
-        <StatCard label="Active Caregivers" value={caregivers} icon={<UsersIcon />} tone="blue" />
-        <StatCard label="Visits Today" value={visitsToday} icon={<CalendarIcon />} tone="violet" />
-        <StatCard label="Open Shifts" value={openShifts} icon={<CalendarIcon />} tone="amber" />
-        <StatCard label="Compliance Alerts" value={expiringCompliance} icon={<ShieldIcon />} tone={expiringCompliance > 0 ? "red" : "green"} />
-        <StatCard label="Outstanding A/R" value={fmtMoney(ar)} icon={<DollarIcon />} tone="green" />
+        <StatCard label="Active Patients" value={patients} icon={<UserIcon />} tone="green" href="/dashboard/patients" />
+        <StatCard label="Active Caregivers" value={caregivers} icon={<UsersIcon />} tone="blue" href="/dashboard/caregivers" />
+        <StatCard label="Visits Today" value={visitsToday} icon={<CalendarIcon />} tone="violet" href="/dashboard/scheduling" />
+        <StatCard label="Open Shifts" value={openShifts} icon={<CalendarIcon />} tone="amber" href="/dashboard/scheduling" />
+        <StatCard label="Compliance Alerts" value={expiringCompliance} icon={<ShieldIcon />} tone={expiringCompliance > 0 ? "red" : "green"} href="/dashboard/compliance" />
+        {canSeeAR && (
+          <StatCard label="Outstanding A/R" value={fmtMoney(ar)} icon={<DollarIcon />} tone="green" href="/dashboard/invoices" />
+        )}
       </div>
+
+      {attention.length > 0 && (
+        <div className="mt-4 flex flex-wrap gap-3">
+          {attention.map((a) => (
+            <Link key={a.href} href={a.href} className={`badge-${a.tone} px-3 py-1.5 text-sm hover:opacity-90`}>
+              {a.value} {a.label} →
+            </Link>
+          ))}
+        </div>
+      )}
 
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
         <SectionCard className="lg:col-span-2" title="Upcoming Visits"

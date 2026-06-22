@@ -55,10 +55,29 @@ model Agency {
   stripeSubscriptionId String?
   trialEndsAt          DateTime?
 
+  // White-label branding + configuration (Agency Configuration Center).
+  // Resolved at runtime by host; all customization is DATA, never code.
+  slug           String? @unique // platform subdomain: <slug>.yourplatform.com
+  logoUrl        String?
+  faviconUrl     String?
+  primaryColor   String? // hex, e.g. #1f775c — re-themes the whole brand palette
+  secondaryColor String? // hex, accent / gradients
+  portalName     String?
+  loginBannerUrl String?
+  customCss      String? // advanced per-agency CSS overrides
+  supportEmail   String?
+  supportPhone   String?
+  emailFromName  String? // email branding ("from" display name)
+  pdfFooter      String? // footer line on generated PDFs
+  featureFlags   String? // JSON map of { featureKey: boolean }
+  payPeriod      String  @default("BIWEEKLY") // WEEKLY|BIWEEKLY|SEMIMONTHLY|MONTHLY
+  mileageRate    Float   @default(0.67) // $ per mile reimbursement
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relations (back-refs)
+  domains              AgencyDomain[]
   users                User[]
   branches             Branch[]
   departments          Department[]
@@ -92,8 +111,34 @@ model Agency {
   securityEvents       SecurityEvent[]
   apiKeys              ApiKey[]
   aiInsights           AiInsight[]
+  scheduleRequests     ScheduleRequest[]
+  medicationLogs       MedicationLog[]
+  careTasks            CareTask[]
+  notifications        Notification[]
+  timeEntries          TimeEntry[]
+  ptoRequests          PtoRequest[]
+  mileageEntries       MileageEntry[]
+  services             Service[]
+  ptoBalances          PtoBalance[]
+  formTemplates        FormTemplate[]
+  integrations         IntegrationSetting[]
 
   @@index([networkId])
+}
+
+// Custom domains mapped to an agency (white-label tenant resolution).
+// Host priority: custom domain (here) → platform subdomain (Agency.slug) →
+// logged-in user's agency → platform default branding.
+model AgencyDomain {
+  id        String   @id @default(cuid())
+  agency    Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId  String
+  domain    String   @unique // e.g. portal.abcagency.com (lowercased, no port)
+  isPrimary Boolean  @default(false)
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([agencyId])
 }
 
 model Branch {
@@ -150,9 +195,12 @@ model User {
   active       Boolean  @default(true)
   // Bumping tokenVersion invalidates all existing JWTs (force logout / ban).
   tokenVersion Int      @default(0)
-  // 2FA (Phase 22)
+  // 2FA (Phase 22) — twoFactorSecret stored AES-256-GCM encrypted at rest
   twoFactorEnabled Boolean @default(false)
   twoFactorSecret  String?
+  // Email verification (Phase 22)
+  emailVerified    DateTime?
+  emailVerifyToken String?
   lastLoginAt  DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -166,6 +214,7 @@ model User {
   sessions        UserSession[]
   sentMessages    Message[]
   auditLogs       AuditLog[]
+  notifications   Notification[]
 
   @@unique([agencyId, email])
   @@index([agencyId])
@@ -212,6 +261,8 @@ model Patient {
   status     String   @default("ACTIVE")
   admittedAt DateTime?
   dischargedAt DateTime?
+  requiredSkills  String? // comma-separated, used by skills-matrix matching
+  genderPreference String? // preferred caregiver gender (matching)
   notes      String?
 
   // Portal access
@@ -240,6 +291,9 @@ model Patient {
   referral          Referral?
   satisfactionSurveys SatisfactionSurvey[]
   familyMembers     User[]   @relation("FamilyUser")
+  scheduleRequests  ScheduleRequest[]
+  medicationLogs    MedicationLog[]
+  careTasks         CareTask[]
 
   @@index([agencyId])
   @@index([branchId])
@@ -359,14 +413,20 @@ model Caregiver {
   city        String?
   state       String?
   zip         String?
-  // RN|LPN|CNA|HHA|COMPANION|THERAPIST
+  // RN|LPN|CNA|HHA|MED_TECH|MEDICAL_ASSISTANT|COMPANION|HOMEMAKER|THERAPIST
   discipline  String   @default("HHA")
+  // W2|CONTRACTOR_1099 (drives overtime / PTO eligibility)
+  employmentType String @default("W2")
   // ACTIVE|INACTIVE|ON_LEAVE|TERMINATED|ONBOARDING
   status      String   @default("ACTIVE")
   hireDate    DateTime?
   hourlyRate  Float?
   languages   String? // comma-separated, used by language matching
-  maxHoursPerWeek Int?
+  gender      String? // used by patient gender-preference matching
+  yearsExperience Int?
+  maxHoursPerWeek Int? // weekly hours available — required at registration
+  skillSet    String? // comma-separated competencies selected at registration
+  availableDays String? // comma day codes (MO,TU,WE,TH,FR,SA,SU) — required at registration
   latitude    Float?
   longitude   Float?
   notes       String?
@@ -382,6 +442,10 @@ model Caregiver {
   complianceItems    ComplianceItem[]
   documents          Document[]
   payrollEntries     PayrollEntry[]
+  timeEntries        TimeEntry[]
+  ptoRequests        PtoRequest[]
+  mileageEntries     MileageEntry[]
+  ptoBalance         PtoBalance?
 
   @@index([agencyId])
   @@index([branchId])
@@ -504,6 +568,7 @@ model EvvRecord {
   // PENDING|VERIFIED|FAILED|MANUAL_OVERRIDE
   verification String  @default("PENDING")
   durationMinutes Int?
+  signatureName String? // caregiver e-signature captured at checkout
   notes       String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -528,6 +593,7 @@ model VisitNote {
   assessment String?
   plan       String?
   narrative  String?
+  checklist  String? // JSON of structured visit checklist items {label, done}
   // DRAFT|SIGNED
   status    String   @default("DRAFT")
   signedAt  DateTime?
@@ -682,16 +748,34 @@ model Document {
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Conversation {
-  id        String    @id @default(cuid())
-  agency    Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
-  agencyId  String
-  subject   String?
+  id          String    @id @default(cuid())
+  agency      Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId    String
+  subject     String?
   // DIRECT|GROUP
-  kind      String    @default("DIRECT")
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  messages  Message[]
+  kind        String    @default("DIRECT")
+  createdById String? // user who started the conversation
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  messages    Message[]
+  participants ConversationParticipant[]
 
+  @@index([agencyId])
+}
+
+// Conversation membership — drives messaging visibility + recipient restrictions
+// (caregivers may only message supervisors/schedulers). userId is a plain id
+// (no FK back-ref) to match the codebase's lightweight actor-id convention.
+model ConversationParticipant {
+  id             String       @id @default(cuid())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversationId String
+  agencyId       String
+  userId         String
+  role           String? // role snapshot at add time (display only)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
   @@index([agencyId])
 }
 
@@ -1126,5 +1210,244 @@ model ApiKey {
   revokedAt  DateTime?
   createdAt  DateTime @default(now())
 
+  @@index([agencyId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PORTAL REQUESTS (Phase 7 — request → staff approve)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ScheduleRequest {
+  id              String   @id @default(cuid())
+  agency          Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId        String
+  patient         Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId       String
+  visitId         String?
+  requestedById   String?
+  requestedByName String?
+  // RESCHEDULE|CANCEL|NEW_VISIT|CAREGIVER_CHANGE|AVAILABILITY|QUESTION
+  type            String   @default("RESCHEDULE")
+  message         String
+  preferredDate   DateTime?
+  preferredCaregiver String?
+  preferredCaregiverId String? // resolved caregiver id for "request a specific caregiver"
+  // PENDING|APPROVED|DECLINED
+  status          String   @default("PENDING")
+  reviewedById    String?
+  reviewNote      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([agencyId])
+  @@index([patientId])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MEDICATION ADMINISTRATION (Med Tech module)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model MedicationLog {
+  id             String    @id @default(cuid())
+  agency         Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId       String
+  patient        Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId      String
+  medicationName String
+  medicationId   String?
+  caregiverId    String?
+  visitId        String?
+  scheduledAt    DateTime?
+  administeredAt DateTime?
+  // SCHEDULED|GIVEN|MISSED|REFUSED|ERROR
+  status         String    @default("SCHEDULED")
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([agencyId])
+  @@index([patientId])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CARE TASKS (patient daily task lists)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model CareTask {
+  id            String    @id @default(cuid())
+  agency        Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId      String
+  patient       Patient   @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId     String
+  visitId       String?
+  title         String
+  // MORNING|AFTERNOON|EVENING|ANYTIME
+  timeOfDay     String    @default("MORNING")
+  // PENDING|DONE|SKIPPED
+  status        String    @default("PENDING")
+  completedAt   DateTime?
+  completedById String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([agencyId])
+  @@index([patientId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IN-APP NOTIFICATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Notification {
+  id        String   @id @default(cuid())
+  agency    Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId  String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  title     String
+  body      String?
+  href      String?
+  // INFO|REQUEST|ALERT|SHIFT
+  kind      String   @default("INFO")
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([agencyId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WORKFORCE: TIME ENTRIES, PTO, MILEAGE (Hours/Payroll readiness)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model TimeEntry {
+  id            String    @id @default(cuid())
+  agency        Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId      String
+  caregiver     Caregiver @relation(fields: [caregiverId], references: [id], onDelete: Cascade)
+  caregiverId   String
+  visitId       String?
+  // VISIT|TRAINING|OFFICE|MEETING|TRAVEL
+  entryType     String    @default("VISIT")
+  clockIn       DateTime?
+  clockOut      DateTime?
+  regularHours  Float     @default(0)
+  overtimeHours Float     @default(0)
+  // DRAFT|SUBMITTED|PENDING|APPROVED|REJECTED|ADJUSTED|LOCKED|EXPORTED
+  status        String    @default("SUBMITTED")
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([agencyId])
+  @@index([caregiverId])
+  @@index([status])
+}
+
+model PtoRequest {
+  id          String    @id @default(cuid())
+  agency      Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId    String
+  caregiver   Caregiver @relation(fields: [caregiverId], references: [id], onDelete: Cascade)
+  caregiverId String
+  // VACATION|SICK|HOLIDAY|FLOATING
+  type        String    @default("VACATION")
+  hours       Float     @default(0)
+  startDate   DateTime?
+  endDate     DateTime?
+  // REQUESTED|APPROVED|DENIED|USED|EXPIRED
+  status      String    @default("REQUESTED")
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([agencyId])
+  @@index([caregiverId])
+}
+
+model MileageEntry {
+  id          String    @id @default(cuid())
+  agency      Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId    String
+  caregiver   Caregiver @relation(fields: [caregiverId], references: [id], onDelete: Cascade)
+  caregiverId String
+  date        DateTime?
+  miles       Float     @default(0)
+  // PATIENT_TO_PATIENT|BRANCH_TO_PATIENT|TRAINING|AGENCY
+  type        String    @default("PATIENT_TO_PATIENT")
+  // SUBMITTED|APPROVED|REJECTED|PAID
+  status      String    @default("SUBMITTED")
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([agencyId])
+  @@index([caregiverId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AGENCY CONFIGURATION CENTER (services, PTO balances, forms, integrations)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Service {
+  id           String   @id @default(cuid())
+  agency       Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId     String
+  name         String
+  description  String?
+  price        Float    @default(0)
+  durationMins Int?
+  requiredSkill String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([agencyId])
+}
+
+model PtoBalance {
+  id             String    @id @default(cuid())
+  agency         Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId       String
+  caregiver      Caregiver @relation(fields: [caregiverId], references: [id], onDelete: Cascade)
+  caregiverId    String    @unique
+  vacationHours  Float     @default(0)
+  sickHours      Float     @default(0)
+  holidayHours   Float     @default(0)
+  floatingHours  Float     @default(0)
+  usedHours      Float     @default(0)
+  updatedAt      DateTime  @updatedAt
+
+  @@index([agencyId])
+}
+
+model FormTemplate {
+  id        String   @id @default(cuid())
+  agency    Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId  String
+  name      String
+  category  String   @default("INTAKE") // INTAKE|INCIDENT|ASSESSMENT|EVALUATION|CONSENT|OTHER
+  // JSON array of fields: [{ label, type, required }]
+  fields    String   @default("[]")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([agencyId])
+}
+
+model IntegrationSetting {
+  id        String   @id @default(cuid())
+  agency    Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId  String
+  provider  String // QUICKBOOKS|ADP|GUSTO|PAYCHEX|STRIPE|TWILIO|DOCUSIGN|GOOGLE|MICROSOFT|ZOOM
+  connected Boolean  @default(false)
+  config    String? // JSON (non-secret) settings
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([agencyId, provider])
   @@index([agencyId])
 }

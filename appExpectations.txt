@@ -14,7 +14,46 @@ Stack delivered (per APP_BLUEPRINT): Next.js 14 App Router + TypeScript, Prisma
 Zod validation, generic CRUD factory + dynamic /api/r/[resource] dispatcher,
 deny-by-default RBAC, Tailwind teal theme, Stripe subscription billing,
 zero-dep PDF, CSV export with formula-injection guard, Vitest tests.
-Verification: `tsc --noEmit` clean · 11/11 unit tests pass · `next build` green.
+Verification: `tsc --noEmit` clean · 15/15 unit tests pass · `next build` green.
+
+LATEST BUILD ROUND — see BACKLOG.md for the full deduped checklist. Newly shipped:
+✅ Scheduling permission lockdown: Scheduling + Visits are visible ONLY to
+   scheduler-and-up (Owner / Admin / Clinical Director / Nurse Supervisor /
+   Scheduler). Field staff (RN/LPN/HHA/CNA/Caregiver) no longer have
+   scheduling:read — they cannot see the agency schedule, the roster, or assign
+   caregivers. They see ONLY their own assigned shifts (My Shifts) and a personal
+   caregiver dashboard. EVV check-in/out moved to My Shifts with own-visit
+   ownership enforced server-side; the agency-wide EVV board is a supervisor monitor.
+✅ Patient requests: request a SPECIFIC caregiver (chosen from caregivers who have
+   worked with them) and request an ADDITIONAL visit; scheduler approval reassigns
+   or creates the visit (scope-of-practice verified).
+✅ Messaging rule enforced: conversation participants model; a caregiver may only
+   message a supervisor/scheduler; threads are participant-scoped (admins oversee all).
+✅ Self-serve SIGNUP: creates a new agency and makes the registrant its Agency Owner
+   (role fixed server-side; email verification). Foundation for SaaS multi-agency.
+✅ Discipline-specific demo logins: rn@ / lpn@ / hha@ / cna@ (+ generic caregiver@),
+   each linked to a caregiver record with upcoming assigned shifts.
+✅ WHITE LABEL — runtime multi-agency (per the white-label workflow spec):
+   - Tenant resolved from the HOST at request time: custom domain (agency_domains)
+     → platform subdomain (Agency.slug) → logged-in user's agency → platform default.
+   - Branding is DATA not code: portal name, logo, favicon, login banner, support
+     email/phone, PDF footer; the WHOLE brand palette re-themes from one primary
+     color (Tailwind brand scale now CSS-variable channels overridden by <BrandStyle>).
+   - Admin panel: branding fields + custom-domains manager (/api/admin/domains) +
+     platform subdomain slug. Login/signup pages brand by host; PDFs carry agency footer.
+   - Second demo agency seeded — "Sunrise Care" (blue) at http://sunrise.localhost:3000
+     vs Cura_Sera (teal) at http://localhost:3000 — same code, different data, isolated.
+
+EARLIER ROUND:
+✅ Data isolation: branch isolation, assignment-based patient access, medical
+   2-level separation (care vs clinical caps), audit-on-view, branch-aware dashboards
+✅ Open Shift Marketplace (claim → scheduler approve), Family invite via patient
+✅ Workforce: Time entries, PTO (requests + balances), Mileage, W2/1099, My Time self-service
+✅ Agency Configuration Center: white-label branding, per-agency FEATURE FLAGS,
+   service catalog, forms builder (templates), integrations registry, payroll config
+✅ Security: TOTP 2FA, email verification + resend, AES-256-GCM field encryption
+✅ EVV exception flags · AI caregiver-match % · structured visit-note checklist field
+See APP_BLUEPRINT.md §16 for the generalized, reusable versions of these patterns.
 
 ========================================================
 PHASE 1 — CORE CLINICAL OPERATIONS  ✅
@@ -69,23 +108,25 @@ PHASE 2 — STAFF MANAGEMENT (ROLES)  ✅  (src/lib/enums.ts + authz.ts RBAC)
 ========================================================
 PHASE 3 — SCHEDULING ENGINE  🟡  (/dashboard/scheduling + /api/scheduling/suggest)
 ========================================================
-🟡 Drag and drop schedule (agenda board with assign; no DnD)
+🟡 Drag and drop schedule (agenda board + inline edit/reassign; no DnD lib yet)
 ✅ Open shifts
 🟡 Shift marketplace (open shifts surfaced; no self-claim flow)
-🟡 Recurring visits (recurrenceRule modeled; no auto-generation job)
+✅ Recurring visits (auto-generation — Scheduling → "Generate recurring", 4-week horizon)
 ✅ Availability matching
 ✅ Overtime prevention (weekly-hours scoring)
-🟡 Distance optimization (caregiver geo stored; not yet in score)
-⬜ Route optimization
+🟡 Distance optimization (same-city proximity now weighted; full geo routing pending)
+⬜ Route optimization (needs patient geocoordinates)
 ⬜ Shift reminders (notification delivery)
-🟡 Emergency replacement (reassign via suggestions)
+✅ Emergency replacement (inline reassign + AI suggestions)
+✅ Inline reschedule/reassign without delete (48h rule: senior roles only within 48h)
 
 Scheduling Intelligence
-🟡 Closest caregiver (geo stored; distance not yet weighted)
-✅ Proper certification (skilled vs personal-care suitability)
-🟡 Language matching (languages stored; not yet weighted)
-🟡 Skill matching (skills modeled; not yet weighted)
+🟡 Closest caregiver (same-city proximity proxy weighted; true distance pending geo)
+✅ Proper certification (skilled vs personal-care suitability + scope-of-practice block)
+🟡 Language matching (caregiver languages stored; patient language pref pending)
+✅ Skill matching (skills-matrix weighted in suggestions)
 ✅ Availability matching
+✅ Gender-preference matching   ✅ Experience-level weighting
 
 ========================================================
 PHASE 4 — EVV (ELECTRONIC VISIT VERIFICATION)  ✅  (/dashboard/evv + /api/visits/[id]/evv)
@@ -127,7 +168,8 @@ PHASE 7 — PATIENT PORTAL  🟡  (/portal)
 ✅ View schedule
 ✅ View caregiver
 ✅ View care plan
-⬜ Request visit changes
+✅ Request visit changes (portal request → staff approve workflow)
+✅ Change availability request (same workflow, type=AVAILABILITY)
 🟡 Send messages (messaging is staff-scoped today)
 ✅ View invoices
 ⬜ Upload documents
@@ -229,8 +271,8 @@ PHASE 18 — AI MODULES  ✅ (rule-based engine)  (/dashboard/ai-insights + /api
 PHASE 19 — ADMIN SYSTEM  ✅  (/dashboard/admin/*)
 ========================================================
 ✅ Users ✅ Roles ✅ Permissions (capability matrix) ✅ Billing ✅ Plans
-✅ Audit Logs 🟡 Reports (PDF/CSV exports) ✅ System Settings 🟡 API Keys (model present)
-🟡 Notifications (announcements; no delivery channel)
+✅ Audit Logs ✅ Reports (Reports center: roster, compliance, payroll CSVs + patient PDFs)
+✅ System Settings 🟡 API Keys (model present) ✅ Notifications (in-app bell + delivery)
 
 ========================================================
 PHASE 20 — MULTI-AGENCY SaaS  ✅
@@ -249,9 +291,12 @@ Billing Models: ✅ Per Agency  🟡 Per Patient/Caregiver/Visit/Location/User (
 PHASE 22 — SECURITY  ✅/🟡
 ========================================================
 🟡 HIPAA Compliance (posture: RBAC, audit, generic errors, scoping; not certified)
-✅ Role-Based Access  ✅ Audit Logs  ➖ Encryption at rest  ➖ Backups
-🟡 2FA (fields modeled; no TOTP flow)  🟡 Device Tracking (UserSession model)
+✅ Role-Based Access  ✅ Audit Logs  ➖ Backups
+✅ Encryption at rest (app-level AES-256-GCM: 2FA secrets + insurance member IDs; ENCRYPTION_KEY)
+✅ Email verification + resend (dev-link; SMTP-ready via RESEND_API_KEY/SMTP_URL)
+✅ 2FA (TOTP enroll in Settings + verify-on-login, RFC-6238)  🟡 Device Tracking (UserSession model)
 ✅ Session Control (tokenVersion force-logout on deactivate)  ➖ Disaster Recovery
+✅ In-app notifications (bell + per-user delivery)
 
 ========================================================
 PHASE 23 — ENTERPRISE FEATURES  🟡
@@ -379,3 +424,3377 @@ drag-and-drop & route optimization, e-signatures & file uploads, TOTP 2FA UI,
 SSO / white-label / public API, push-notification delivery, and per-seat billing
 meters. Ops items (➖) — encryption at rest, backups, DR — are deployment concerns
 documented in README/APP_BLUEPRINT (Postgres + Railway + Cloudflare).
+
+========================================================
+NON-MEDICAL HOME CARE AGENCY
+WORKFORCE MANAGEMENT SYSTEM
+(HHA, CNA, MED TECH, MEDICAL ASSISTANT)
+========================================================
+
+IMPORTANT
+
+Actual services allowed depend on:
+
+- State regulations
+- Agency license type
+- Employee certification
+- Scope of practice
+
+The system should manage WHO can do WHAT,
+WHEN, WHERE, and UNDER WHAT LICENSE.
+
+========================================================
+WORKFORCE SECTION — DEDUPE & STATUS
+========================================================
+This appended section is ~90% a restatement of Phases 1-35. Duplicates are
+SKIPPED (already built): HHA/CNA/Med Tech/Medical Assistant mgmt → Caregivers
+(P1-2); Recruitment/Applicant Tracking/Onboarding/Background Screening → P13/25;
+Staff Scheduling & Patient↔Staff Matching → P3; Service Authorization → P28;
+Caregiver Mobile App → P9; Supervisor/HR/Compliance dashboards → P6/13/14/19;
+Payroll/Performance/QA/Enterprise Architecture → P12/33/14+29/35.
+
+GENUINELY NEW items — now BUILT this round:
+✅ Med Tech medication module (Medications page + per-patient logs; statuses
+   SCHEDULED/GIVEN/MISSED/REFUSED/ERROR)
+✅ Task Management (Care Tasks: morning/afternoon/evening, completion tracking)
+✅ Scope-of-practice in scheduling (a SKILLED_NURSING/THERAPY visit blocks an
+   unqualified discipline at assignment time)
+✅ Skills-matrix matching + gender-preference + experience weighting in suggestions
+✅ New disciplines (Med Tech, Medical Assistant, Homemaker) + caregiver gender/experience
+✅ Electronic signature on EVV check-out
+🟡 Credential/state verification, retention/turnover analytics, true route
+   optimization (need patient geo) — remaining
+
+========================================================
+WORKFORCE MODULE
+========================================================
+
+EMPLOYEE TYPES
+
+1. HHA
+Home Health Aide
+
+2. CNA
+Certified Nursing Assistant
+
+3. Med Tech
+Medication Technician
+
+4. Medical Assistant
+
+5. Companion
+
+6. Homemaker
+
+7. Caregiver
+
+8. Scheduler
+
+9. RN Supervisor
+
+10. LPN Supervisor
+
+11. Recruiter
+
+12. HR Manager
+
+13. Compliance Manager
+
+14. Payroll Manager
+
+15. Agency Administrator
+
+========================================================
+HHA MANAGEMENT
+========================================================
+
+Employee Profile
+
+- Name
+- Certification Number
+- Certification Expiration
+- CPR Expiration
+- Availability
+- Service Area
+- Languages
+- Transportation
+
+Allowed Skills
+
+- Personal Care
+- Bathing
+- Grooming
+- Dressing
+- Meal Preparation
+- Light Housekeeping
+- Mobility Assistance
+- Companionship
+- Transportation Assistance
+
+System Tracks
+
+- Hours Worked
+- Patients Assigned
+- Notes Completed
+- Visit Completion %
+- Training Status
+
+========================================================
+CNA MANAGEMENT
+========================================================
+
+Profile
+
+- CNA License
+- Expiration Date
+- State Verification
+- CPR Status
+
+Skills Matrix
+
+- Vital Signs
+- Transfers
+- Ambulation
+- Personal Care
+- Observation Reporting
+- ADL Assistance
+
+Track
+
+- Skill Validation
+- Clinical Competencies
+- Annual Reviews
+
+========================================================
+MED TECH MANAGEMENT
+========================================================
+
+Profile
+
+- Medication Certification
+- State Requirements
+- Training Completion
+
+Medication Tasks
+
+- Medication Reminders
+- Medication Assistance
+- Medication Documentation
+
+Track
+
+- Medication Errors
+- Medication Compliance
+- Medication Logs
+
+Alerts
+
+- Missed Medication
+- Medication Error
+- Certification Expiring
+
+========================================================
+MEDICAL ASSISTANT MANAGEMENT
+========================================================
+
+Profile
+
+- Certification
+- Training Records
+- Skills
+
+Track
+
+- Assessments
+- Documentation
+- Administrative Tasks
+- Clinical Support Activities
+
+========================================================
+RECRUITMENT MODULE
+========================================================
+
+Job Board
+
+Open Positions
+
+- HHA
+- CNA
+- Med Tech
+- Medical Assistant
+- Scheduler
+- Supervisor
+
+Applicant Tracking
+
+Applied
+
+↓
+
+Interview
+
+↓
+
+Background Check
+
+↓
+
+Training
+
+↓
+
+Orientation
+
+↓
+
+Approved
+
+↓
+
+Active Employee
+
+========================================================
+BACKGROUND SCREENING
+========================================================
+
+Track
+
+- Level 2 Background Check
+- Fingerprints
+- Drug Screening
+- References
+- Employment Verification
+
+Status
+
+Pending
+
+Approved
+
+Denied
+
+Expired
+
+========================================================
+ONBOARDING MODULE
+========================================================
+
+Required Documents
+
+- Driver License
+- CPR Card
+- Certification
+- Auto Insurance
+- W9
+- I9
+- Direct Deposit
+
+Required Training
+
+- HIPAA
+- Infection Control
+- Abuse Reporting
+- Emergency Procedures
+- Agency Policies
+
+========================================================
+SKILLS MANAGEMENT
+========================================================
+
+Every employee receives a skills profile.
+
+Examples
+
+HHA
+
+✓ Bathing
+✓ Dressing
+✓ Meal Prep
+✓ Transfers
+
+CNA
+
+✓ Vitals
+✓ Ambulation
+✓ Transfers
+
+Med Tech
+
+✓ Medication Assistance
+✓ Medication Documentation
+
+System automatically matches
+patients based on required skills.
+
+========================================================
+STAFF SCHEDULING
+========================================================
+
+Open Shift
+
+↓
+
+Match Employee
+
+↓
+
+Verify Availability
+
+↓
+
+Verify Skills
+
+↓
+
+Verify Distance
+
+↓
+
+Assign Shift
+
+Features
+
+- Recurring shifts
+- Shift swap
+- Open shifts
+- Overtime prevention
+- Route optimization
+
+========================================================
+SERVICE AUTHORIZATION
+========================================================
+
+Before assignment system verifies:
+
+Patient Needs
+
+↓
+
+Required Skill
+
+↓
+
+Authorized Service
+
+↓
+
+Certified Worker
+
+Example
+
+Patient Requires
+
+- Bathing
+- Dressing
+- Meal Preparation
+
+System Can Assign
+
+✓ HHA
+✓ CNA
+
+System Cannot Assign
+
+✗ Scheduler
+✗ HR Manager
+
+========================================================
+CAREGIVER MOBILE APP
+========================================================
+
+Clock In
+
+GPS Verification
+
+Patient Information
+
+Task List
+
+Visit Notes
+
+Care Plan
+
+Messages
+
+Clock Out
+
+Electronic Signature
+
+========================================================
+TASK MANAGEMENT
+========================================================
+
+Patient Tasks
+
+Morning
+
+- Bathing
+- Grooming
+- Breakfast
+
+Afternoon
+
+- Medication Reminder
+- Walk
+
+Evening
+
+- Dinner
+- Safety Check
+
+Completed Tasks Logged Automatically
+
+========================================================
+PATIENT TO STAFF MATCHING
+========================================================
+
+Match Factors
+
+- Language
+- Distance
+- Skills
+- Gender Preference
+- Availability
+- Experience Level
+- Certifications
+
+AI Matching Score
+
+100%
+
+Best Caregiver Recommendation
+
+========================================================
+SUPERVISOR DASHBOARD
+========================================================
+
+View
+
+- Active Employees
+- Open Shifts
+- Missed Visits
+- Late Arrivals
+- Documentation Completion
+
+Monitor
+
+- Performance
+- Compliance
+- Training
+
+========================================================
+HR DASHBOARD
+========================================================
+
+Track
+
+- Hiring Pipeline
+- Employee Status
+- Expiring Certifications
+- Background Checks
+- Turnover
+
+========================================================
+COMPLIANCE DASHBOARD
+========================================================
+
+Track
+
+- CPR Expiration
+- License Expiration
+- Training Due
+- Missing Documents
+
+Compliance Score
+
+Agency Score
+
+Employee Score
+
+========================================================
+PAYROLL MODULE
+========================================================
+
+Track
+
+- Hours Worked
+- Mileage
+- Overtime
+- Bonuses
+- Differential Pay
+
+Export
+
+- ADP
+- Gusto
+- Paychex
+- QuickBooks
+
+========================================================
+PERFORMANCE MANAGEMENT
+========================================================
+
+Metrics
+
+Attendance
+
+Punctuality
+
+Patient Satisfaction
+
+Documentation Completion
+
+Incident Rate
+
+Supervisor Reviews
+
+========================================================
+QUALITY ASSURANCE
+========================================================
+
+Monitor
+
+- Missed Visits
+- Patient Complaints
+- Family Complaints
+- Incident Reports
+- Caregiver Performance
+
+========================================================
+ENTERPRISE WORKFORCE ARCHITECTURE
+========================================================
+
+Platform Owner
+
+↓
+
+Agency
+
+↓
+
+Branch
+
+↓
+
+Department
+
+↓
+
+Supervisor
+
+↓
+
+Employee
+
+HHA
+CNA
+Med Tech
+Medical Assistant
+
+↓
+
+Patient
+
+========================================================
+ADDITIONAL MODULES TO ADD TO YOUR
+EXISTING HOME CARE SaaS
+========================================================
+
+✓ Applicant Tracking System
+✓ Recruitment CRM
+✓ Background Screening
+✓ Certification Management
+✓ Skills Matrix Engine
+✓ Employee Onboarding
+✓ Employee Mobile App
+✓ Workforce Scheduling
+✓ Route Optimization
+✓ Payroll Integration
+✓ Performance Management
+✓ Training Management
+✓ Compliance Monitoring
+✓ Credential Verification
+✓ Service Authorization Engine
+✓ Patient-Caregiver Matching Engine
+✓ Workforce Analytics
+✓ AI Staffing Prediction
+✓ AI Shift Filling
+✓ Employee Retention Analytics
+
+========================================================
+FINAL RESULT
+========================================================
+
+Your platform becomes:
+
+Home Care Operations System
++
+Clinical Management
++
+Workforce Management System
++
+Recruitment System
++
+HR System
++
+Scheduling System
++
+Compliance System
++
+Payroll System
++
+AI Workforce Optimization Platform
+
+all inside a single SaaS product.
+
+========================================================
+HOME HEALTH CARE SaaS
+DATA ISOLATION + ROLE VISIBILITY ARCHITECTURE
+========================================================
+
+YOUR SELECTED MODEL
+
+1. Multi-agency SaaS: YES
+2. Caregivers can see available shifts: YES
+3. Patient portal: YES
+4. Caregiver-to-caregiver visibility: NO
+5. Supervisors see branch records: YES
+6. Branch structure: YES
+7. Non-medical caregivers see limited medical info
+8. LPN/RN/Physician can see medical info
+9. Caregivers can message only supervisor/scheduler
+10. Goal: Single agency, multi-location, later SaaS for agencies
+
+========================================================
+CORE RULE
+========================================================
+
+Every user only sees the information required for their job.
+
+No user should see:
+
+- Other agency data
+- Other branch data unless allowed
+- Other patient data unless assigned or authorized
+- Other caregiver private information
+- Medical information unless their clinical role allows it
+
+========================================================
+TENANT STRUCTURE
+========================================================
+
+Platform Owner
+
+↓
+
+Agency
+
+↓
+
+Branch
+
+↓
+
+Department
+
+↓
+
+Staff / Caregiver
+
+↓
+
+Patient
+
+Example:
+
+Platform
+ ├── Agency A
+ │     ├── Miami Branch
+ │     │     ├── Patients
+ │     │     ├── Caregivers
+ │     │     └── Supervisors
+ │     └── Orlando Branch
+ │           ├── Patients
+ │           ├── Caregivers
+ │           └── Supervisors
+ │
+ └── Agency B
+       ├── Tampa Branch
+       └── Jacksonville Branch
+
+Agency A cannot see Agency B.
+
+Miami Branch cannot see Orlando Branch unless the user has agency-wide permission.
+
+========================================================
+ROLE VISIBILITY MATRIX
+========================================================
+
+PLATFORM OWNER
+
+Can see:
+- All agencies
+- All branches
+- All users
+- Billing
+- System settings
+- Audit logs
+
+Cannot:
+- Abuse patient records without audit trail
+- Delete audit logs
+- View passwords
+
+--------------------------------------------------------
+
+AGENCY OWNER / AGENCY ADMIN
+
+Can see:
+- Their agency only
+- All branches under their agency
+- All patients in their agency
+- All caregivers in their agency
+- Billing
+- Reports
+- Compliance
+- Scheduling
+
+Cannot:
+- See other agencies
+- Modify platform settings
+- Delete audit logs
+
+--------------------------------------------------------
+
+BRANCH SUPERVISOR
+
+Can see:
+- Their branch only
+- Patients in their branch
+- Caregivers in their branch
+- Schedules in their branch
+- Visit notes
+- Incidents
+- Compliance alerts
+
+Cannot:
+- See other branches unless approved
+- See other agencies
+- Modify agency-wide billing
+
+--------------------------------------------------------
+
+SCHEDULER
+
+Can see:
+- Branch patients
+- Branch caregivers
+- Open shifts
+- Availability
+- Schedule conflicts
+- Assigned shifts
+
+Can do:
+- Assign caregiver
+- Reassign caregiver
+- Approve claimed shift
+- Cancel shift
+- Message caregiver
+
+Cannot:
+- See sensitive medical records unless permitted
+- Access payroll details
+- Access agency billing settings
+
+--------------------------------------------------------
+
+NON-MEDICAL CAREGIVER
+HHA / CNA / Companion / Homemaker
+
+Can see:
+- Own profile
+- Own schedule
+- Available open shifts they qualify for
+- Assigned patient basic care information
+- Assigned patient task list
+- Emergency contact
+- Allergies if needed for safety
+- Care restrictions
+- Supervisor messages
+- Scheduler messages
+
+Cannot see:
+- Other caregivers
+- Other caregiver schedules
+- Other caregiver phone numbers
+- Other patients not assigned
+- Full diagnosis
+- Full medical history
+- Clinical notes
+- Billing records
+- Payroll of others
+
+--------------------------------------------------------
+
+CLINICAL STAFF
+LPN / RN / PHYSICIAN
+
+Can see:
+- Assigned patients
+- Medical information
+- Diagnosis
+- Medication list
+- Clinical notes
+- Care plan
+- Assessments
+- Visit documentation
+
+Cannot see:
+- Other agency patients
+- Other branch patients unless assigned
+- Billing settings unless role allows
+- Other staff private files
+
+--------------------------------------------------------
+
+PATIENT
+
+Can see:
+- Own profile
+- Own schedule
+- Assigned caregiver name
+- Care plan summary
+- Visit history
+- Messages from agency
+- Invoices if private pay
+
+Cannot see:
+- Other patients
+- Other caregivers
+- Internal agency notes
+- Staff files
+- Admin reports
+
+--------------------------------------------------------
+
+FAMILY / GUARDIAN
+
+Can see:
+- Approved patient information
+- Schedule
+- Visit status
+- Care updates
+- Agency messages
+
+Cannot see:
+- Other patients
+- Full internal notes unless shared
+- Other family accounts unless authorized
+
+========================================================
+OPEN SHIFT MARKETPLACE RULE
+========================================================
+
+Caregivers can see open shifts, but only limited information.
+
+Open shift visible to caregiver:
+
+- Date
+- Time
+- General location area
+- Required skills
+- Estimated duration
+- Pay type if allowed
+- Basic task category
+
+Open shift hidden until assigned:
+
+- Full patient name
+- Full address
+- Medical information
+- Family contact
+- Private notes
+
+Workflow:
+
+Open Shift Created
+
+↓
+
+System checks caregiver qualifications
+
+↓
+
+Qualified caregivers see shift
+
+↓
+
+Caregiver requests or claims shift
+
+↓
+
+Scheduler approves
+
+↓
+
+Only after approval caregiver sees full assigned patient details
+
+========================================================
+PATIENT DATA ISOLATION RULE
+========================================================
+
+A caregiver can only access a patient record if:
+
+1. Same agency
+2. Same branch or approved branch coverage
+3. Assigned to visit
+4. Shift is active or upcoming
+5. Role has permission
+6. Access is logged
+
+Example:
+
+HHA Maria assigned to Patient John today.
+
+Maria can see:
+- John’s care tasks
+- John’s visit time
+- John’s address
+- John’s emergency contact
+- John’s safety notes
+
+Maria cannot see:
+- John’s full medical history
+- John’s billing
+- Other patients
+- Other caregiver notes not shared
+
+========================================================
+MEDICAL DATA RULE
+========================================================
+
+Medical data is split into two levels.
+
+LEVEL 1: CARE SAFETY DATA
+
+Visible to non-medical caregivers when needed:
+
+- Allergies
+- Fall risk
+- Mobility restrictions
+- Emergency contact
+- Diet restrictions
+- Safety warnings
+- Care instructions
+
+LEVEL 2: CLINICAL MEDICAL DATA
+
+Visible only to LPN, RN, Physician, and approved clinical supervisors:
+
+- Diagnosis
+- Medication list
+- Medication changes
+- Clinical assessments
+- Nursing notes
+- Physician orders
+- Medical history
+
+========================================================
+DATABASE ISOLATION DESIGN
+========================================================
+
+Every important table must include:
+
+agency_id
+branch_id
+created_by
+updated_by
+status
+created_at
+updated_at
+
+Main tables:
+
+agencies
+branches
+users
+roles
+permissions
+patients
+caregivers
+clinical_staff
+schedules
+visits
+open_shifts
+shift_claims
+care_plans
+medical_records
+visit_notes
+messages
+documents
+audit_logs
+
+========================================================
+CRITICAL PERMISSION LOGIC
+========================================================
+
+Every API request checks:
+
+1. Is user logged in?
+2. What is user role?
+3. What agency_id does user belong to?
+4. What branch_id does user belong to?
+5. Is user assigned to this patient?
+6. Is this shift active or approved?
+7. Does this role allow medical access?
+8. Should this action be logged?
+
+If any check fails:
+
+Access denied.
+
+========================================================
+MESSAGING RULE
+========================================================
+
+Caregiver can message:
+
+- Supervisor
+- Scheduler
+
+Caregiver cannot message:
+
+- Other caregivers
+- Other patients
+- Patient family directly unless agency enables it
+
+Recommended channels:
+
+Caregiver → Scheduler
+Caregiver → Supervisor
+Patient → Agency
+Family → Agency
+Supervisor → Caregiver
+Scheduler → Caregiver
+
+========================================================
+AUDIT LOG REQUIREMENT
+========================================================
+
+Log every sensitive action:
+
+- Patient viewed
+- Medical record viewed
+- Visit note created
+- Schedule changed
+- Shift claimed
+- Shift approved
+- Message sent
+- Document downloaded
+- Patient data edited
+- Caregiver profile edited
+
+Audit log fields:
+
+id
+agency_id
+branch_id
+user_id
+role
+action
+target_type
+target_id
+ip_address
+device
+timestamp
+
+========================================================
+FINAL IMPLEMENTATION RULE
+========================================================
+
+Do not rely only on frontend hiding.
+
+Security must happen in:
+
+1. Database
+2. Backend API
+3. Role permissions
+4. Row-level filtering
+5. Audit logs
+
+Frontend only controls what looks visible.
+
+Backend controls what is actually allowed.
+
+========================================================
+BEST FINAL ARCHITECTURE
+========================================================
+
+Home Health Care SaaS
+
+├── Platform Admin
+├── Agency Isolation
+├── Branch Isolation
+├── Role-Based Access Control
+├── Patient Portal
+├── Family Portal
+├── Caregiver Portal
+├── Clinical Staff Portal
+├── Scheduler Portal
+├── Supervisor Portal
+├── Open Shift Marketplace
+├── Medical Data Separation
+├── Non-Medical Data Separation
+├── Secure Messaging
+├── Audit Logs
+├── Compliance Reports
+└── Billing + Payroll
+
+========================================================
+MAIN SECURITY PRINCIPLE
+========================================================
+
+Caregiver sees only what they need.
+
+Patient sees only their own information.
+
+Agency sees only its own organization.
+
+Branch sees only its own branch.
+
+Clinical staff sees medical data only when assigned.
+
+Every sensitive action is logged.
+
+SYSTEM GOAL
+
+Build a secure SaaS platform for a Home Health Care Agency that can manage:
+
+- Agencies
+- Branches
+- Patients
+- Families
+- Caregivers
+- HHA
+- CNA
+- Med Tech
+- Medical Assistant
+- LPN
+- RN
+- Physician
+- Supervisors
+- Schedulers
+- Recruiting
+- Hiring
+- Scheduling
+- Open Shifts
+- Hours Worked
+- Payroll
+- Compliance
+- Billing
+- EVV
+- Patient Portal
+- Family Portal
+- Caregiver Portal
+- Admin System
+
+========================================================
+YOUR SELECTED CONFIGURATION
+========================================================
+
+1. Workforce Type:
+W2 employees and 1099 contractors
+
+2. Open Shift Marketplace:
+Caregiver can claim shift, but scheduler must approve
+
+3. Pay Rates:
+Employee fixed rate + service-based rate
+
+4. Mileage:
+Automatic GPS + manual mileage entry
+
+5. Branch Coverage:
+Caregivers can work across branches
+
+6. Family Portal:
+Family can see all approved information
+
+7. Visit Notes:
+Structured checklist + free-text notes
+
+8. Employee Payroll Visibility:
+Employee can see hours, estimated gross pay, PTO, mileage reimbursement
+
+9. PTO:
+Vacation, sick time, holiday time, floating holidays based on employee type
+
+10. Future Medical Expansion:
+Ready for RN, LPN, PT, OT, Speech Therapy, Home Health
+
+11. SaaS Billing:
+Hybrid billing model
+
+12. White Label:
+Agencies can use their logo, colors, and domain
+
+13. Mobile:
+Responsive web first, native iOS and Android later
+
+14. EVV:
+GPS-based EVV
+
+15. Scheduler:
+Scheduler can approve, cancel, move, and reassign shifts
+
+========================================================
+CORE PLATFORM STRUCTURE
+========================================================
+
+Platform Owner
+
+↓
+
+Agency
+
+↓
+
+Branch
+
+↓
+
+Department
+
+↓
+
+Supervisor / Scheduler
+
+↓
+
+Caregiver / Clinical Staff
+
+↓
+
+Patient
+
+↓
+
+Family / Guardian
+
+========================================================
+MULTI-AGENCY ISOLATION
+========================================================
+
+Agency A cannot see Agency B.
+
+Each agency has:
+
+- Own patients
+- Own caregivers
+- Own staff
+- Own schedules
+- Own billing
+- Own documents
+- Own reports
+- Own settings
+- Own white-label branding
+
+Database must include:
+
+agency_id
+branch_id
+role_id
+user_id
+patient_id
+employee_id
+
+on all important records.
+
+========================================================
+BRANCH ISOLATION
+========================================================
+
+Branches exist under one agency.
+
+Example:
+
+Agency A
+  - Miami Branch
+  - Orlando Branch
+  - Tampa Branch
+
+Default rule:
+
+Branch staff see only their branch.
+
+Exception:
+
+Agency Admin can see all branches.
+Approved caregivers can work across branches.
+Schedulers can assign across branches if permission allows.
+
+========================================================
+ROLE TYPES
+========================================================
+
+Platform Roles:
+
+- Platform Owner
+- Platform Admin
+- Platform Support
+
+Agency Roles:
+
+- Agency Owner
+- Agency Administrator
+- Clinical Director
+- Branch Supervisor
+- Scheduler
+- HR Manager
+- Recruiter
+- Payroll Manager
+- Billing Manager
+- Compliance Manager
+
+Care Roles:
+
+- HHA
+- CNA
+- Med Tech
+- Medical Assistant
+- Companion
+- Homemaker
+- LPN
+- RN
+- Physician
+
+External Roles:
+
+- Patient
+- Family Member
+- Guardian
+- Auditor
+
+========================================================
+PATIENT DATA ACCESS RULE
+========================================================
+
+Patient sees only their own information.
+
+Family sees only approved information for their patient.
+
+Caregiver sees only:
+
+- Assigned patients
+- Approved shift information
+- Care tasks
+- Safety information
+- Schedule
+- Visit notes for assigned visits
+
+Caregiver cannot see:
+
+- Other patients
+- Other caregivers
+- Other caregiver hours
+- Other caregiver pay
+- Full medical data unless clinical role allows it
+
+========================================================
+MEDICAL DATA ACCESS RULE
+========================================================
+
+Non-medical caregivers:
+
+HHA
+CNA
+Companion
+Homemaker
+Med Tech depending on agency rules
+
+Can see:
+
+- Care tasks
+- Allergies
+- Fall risk
+- Safety notes
+- Mobility restrictions
+- Emergency contacts
+- Diet restrictions
+- Care instructions
+
+Cannot see:
+
+- Full diagnosis
+- Full medical history
+- Physician orders
+- Clinical assessments
+- Nursing notes
+
+Clinical roles:
+
+LPN
+RN
+Physician
+
+Can see:
+
+- Diagnosis
+- Medication list
+- Clinical notes
+- Medical history
+- Physician orders
+- Assessments
+- Clinical care plan
+
+========================================================
+CAREGIVER PORTAL
+========================================================
+
+Caregiver can see:
+
+- Own profile
+- Own schedule
+- Open shifts they qualify for
+- Approved assigned shifts
+- Assigned patient basic information
+- Care tasks
+- Clock-in / clock-out
+- GPS EVV status
+- Visit notes
+- Hours worked
+- Weekly hours
+- Pay period hours
+- Overtime
+- Mileage
+- Estimated gross pay
+- PTO balance
+- Messages from scheduler
+- Messages from supervisor
+
+Caregiver cannot see:
+
+- Other caregivers
+- Other caregiver schedules
+- Other caregiver payroll
+- Other patients
+- Agency financial reports
+- Admin settings
+
+========================================================
+OPEN SHIFT MARKETPLACE
+========================================================
+
+Workflow:
+
+Open Shift Created
+
+↓
+
+System checks required skills
+
+↓
+
+Qualified caregivers see the shift
+
+↓
+
+Caregiver claims shift
+
+↓
+
+Scheduler approves
+
+↓
+
+Caregiver receives full assignment details
+
+Before approval, caregiver can see:
+
+- Date
+- Time
+- General location area
+- Required skills
+- Estimated duration
+- Basic service type
+
+Before approval, caregiver cannot see:
+
+- Full patient name
+- Full address
+- Private notes
+- Medical information
+- Family contact information
+
+========================================================
+SCHEDULER PERMISSIONS
+========================================================
+
+Scheduler can:
+
+- Create shifts
+- Approve claimed shifts
+- Cancel shifts
+- Move shifts
+- Reassign caregivers
+- View open shifts
+- View caregiver availability
+- View branch schedules
+- View cross-branch availability if allowed
+- Message caregivers
+- Message supervisors
+
+Scheduler cannot:
+
+- Edit payroll after final approval
+- Delete audit logs
+- Access platform settings
+- View unrelated agency data
+
+========================================================
+HOURS WORKED ENGINE
+========================================================
+
+The Hours Engine is the source of truth for payroll, compliance, EVV, and billing.
+
+Flow:
+
+Schedule Created
+
+↓
+
+Caregiver Clocks In
+
+↓
+
+GPS Verified
+
+↓
+
+Visit Starts
+
+↓
+
+Tasks Completed
+
+↓
+
+Caregiver Clocks Out
+
+↓
+
+GPS Verified
+
+↓
+
+Hours Calculated
+
+↓
+
+Supervisor Review
+
+↓
+
+Payroll Approval
+
+↓
+
+Payroll Export
+
+========================================================
+EMPLOYEE HOURS DASHBOARD
+========================================================
+
+Employee can see:
+
+Today’s Hours
+
+This Week’s Hours
+
+This Pay Period Hours
+
+Regular Hours
+
+Overtime Hours
+
+Mileage
+
+Estimated Gross Pay
+
+PTO Balance
+
+Upcoming Shifts
+
+Completed Visits
+
+Pending Approval Hours
+
+Rejected Time Entries
+
+========================================================
+TIME ENTRY TYPES
+========================================================
+
+1. Visit Time
+
+Created from clock-in and clock-out.
+
+2. Training Time
+
+Manual or scheduled.
+
+3. Office Time
+
+For admin or internal work.
+
+4. Meeting Time
+
+Staff meetings, supervision, training.
+
+5. Travel Time
+
+If agency allows payment.
+
+6. Mileage
+
+GPS or manual entry.
+
+========================================================
+TIME ENTRY STATUS
+========================================================
+
+Draft
+
+Submitted
+
+Pending Review
+
+Approved
+
+Rejected
+
+Adjusted
+
+Locked
+
+Exported to Payroll
+
+========================================================
+OVERTIME ENGINE
+========================================================
+
+Supports:
+
+- W2 overtime rules
+- Contractor tracking without overtime rules
+- Weekly overtime
+- Daily overtime if required
+- Agency-specific overtime rules
+- Overtime alerts
+
+Example:
+
+Regular Hours: 40
+Overtime Hours: 6
+Total Hours: 46
+
+Alert:
+
+Employee approaching overtime.
+
+========================================================
+PAY RATE ENGINE
+========================================================
+
+Supports both:
+
+1. Employee Fixed Rate
+
+Example:
+
+Maria HHA = $18/hr
+
+2. Service-Based Rate
+
+Examples:
+
+Companionship = $18/hr
+Bathing Assistance = $20/hr
+Weekend Care = $25/hr
+Holiday Care = $30/hr
+
+Final pay rate can be calculated by:
+
+employee rate
+service rate
+branch rate
+holiday rate
+weekend rate
+overtime rule
+contractor rule
+
+========================================================
+PAYROLL VISIBILITY
+========================================================
+
+Employee can see:
+
+- Approved hours
+- Pending hours
+- Rejected hours
+- Overtime
+- Estimated gross pay
+- Mileage reimbursement
+- PTO balance
+- Pay period summary
+
+Employee cannot see:
+
+- Other employee pay
+- Agency payroll totals
+- Payroll configuration
+- Agency profit margin
+
+========================================================
+PTO ENGINE
+========================================================
+
+Supports:
+
+- Vacation
+- Sick time
+- Holiday time
+- Floating holidays
+
+PTO depends on employee classification:
+
+W2 Full-Time:
+Can receive PTO based on policy.
+
+W2 Part-Time:
+Can receive limited PTO if agency allows.
+
+1099 Contractor:
+Usually no PTO unless agency policy allows special unpaid time tracking.
+
+PTO status:
+
+Available
+Requested
+Approved
+Denied
+Used
+Expired
+
+========================================================
+MILEAGE ENGINE
+========================================================
+
+Supports:
+
+- Automatic GPS mileage
+- Manual mileage entry
+- Supervisor approval
+- Reimbursement calculation
+- Mileage reports
+
+Mileage types:
+
+- Patient-to-patient
+- Branch-to-patient
+- Training travel
+- Approved agency travel
+
+Mileage status:
+
+Submitted
+Approved
+Rejected
+Paid
+
+========================================================
+EVV MODULE
+========================================================
+
+EVV method:
+
+GPS
+
+Clock-in requires:
+
+- User authentication
+- Shift verification
+- GPS location
+- Time stamp
+- Device record
+
+Clock-out requires:
+
+- GPS location
+- Time stamp
+- Completed task checklist
+- Visit note
+- Signature if required
+
+EVV flags:
+
+- Late clock-in
+- Early clock-out
+- Wrong location
+- Missing clock-out
+- Visit shorter than required
+- Visit longer than scheduled
+
+========================================================
+VISIT NOTES
+========================================================
+
+Visit notes include:
+
+Structured checklist
+
+Example:
+
+Bathing completed
+Meal prepared
+Light housekeeping completed
+Medication reminder given
+Mobility assistance completed
+
+Free-text note
+
+Example:
+
+Patient was in good condition today. Ate lunch and completed walk with assistance.
+
+Visit note status:
+
+Draft
+Submitted
+Reviewed
+Approved
+Returned for correction
+
+========================================================
+PATIENT PORTAL
+========================================================
+
+Patient can see:
+
+- Own profile
+- Schedule
+- Assigned caregiver
+- Visit history
+- Care plan summary
+- Messages from agency
+- Invoices if private pay
+- Documents shared by agency
+
+Patient cannot see:
+
+- Other patients
+- Internal staff notes
+- Agency financial records
+- Caregiver private profile
+- Other caregiver schedules
+
+========================================================
+FAMILY PORTAL
+========================================================
+
+Family can see approved information:
+
+- Patient schedule
+- Assigned caregiver name
+- Visit status
+- Care notes approved for family view
+- Documents
+- Messages
+- Care plan summary
+- Emergency updates
+- Invoice information if allowed
+
+Family cannot see:
+
+- Internal staff-only notes
+- Other patients
+- Agency financial reports
+- Staff payroll
+- Audit logs
+
+========================================================
+MESSAGING RULES
+========================================================
+
+Caregiver can message:
+
+- Supervisor
+- Scheduler
+
+Caregiver cannot message:
+
+- Other caregivers
+- Other patients
+- Patient family directly unless agency enables it later
+
+Patient can message:
+
+- Agency
+- Scheduler
+- Supervisor
+
+Family can message:
+
+- Agency
+- Scheduler
+- Supervisor
+
+========================================================
+RECRUITING MODULE
+========================================================
+
+Recruit for:
+
+- HHA
+- CNA
+- Med Tech
+- Medical Assistant
+- Companion
+- Homemaker
+- LPN
+- RN
+- Physician
+
+Pipeline:
+
+Lead
+
+↓
+
+Application
+
+↓
+
+Screening
+
+↓
+
+Interview
+
+↓
+
+Background Check
+
+↓
+
+Credential Review
+
+↓
+
+Training
+
+↓
+
+Approval
+
+↓
+
+Active Employee
+
+========================================================
+ONBOARDING MODULE
+========================================================
+
+Required documents:
+
+- Driver License
+- Social Security Verification
+- I-9
+- W-4 or W-9
+- CPR card
+- Certifications
+- License
+- Auto insurance
+- TB test if required
+- Background check
+- Drug test if required
+
+Required training:
+
+- HIPAA
+- Infection control
+- Abuse reporting
+- Emergency procedures
+- Agency policies
+- Patient privacy
+- Documentation standards
+
+========================================================
+SKILLS MATRIX
+========================================================
+
+Each employee has a skills profile.
+
+HHA:
+
+- Bathing
+- Dressing
+- Grooming
+- Meal preparation
+- Companionship
+- Light housekeeping
+
+CNA:
+
+- ADL assistance
+- Transfers
+- Mobility assistance
+- Vital signs if allowed
+- Observation reporting
+
+Med Tech:
+
+- Medication reminders
+- Medication assistance if allowed
+- Medication documentation if allowed
+
+Medical Assistant:
+
+- Documentation support
+- Clinical support if permitted
+- Office clinical workflow
+
+LPN / RN:
+
+- Clinical assessment
+- Medication management
+- Nursing notes
+- Care plan review
+
+Physician:
+
+- Orders
+- Medical review
+- Clinical oversight
+
+========================================================
+PATIENT CARE REQUIREMENT ENGINE
+========================================================
+
+Patient profile includes:
+
+- Required services
+- Skill needs
+- Schedule needs
+- Mobility level
+- Fall risk
+- Language preference
+- Gender preference if applicable
+- Location
+- Emergency contact
+- Restrictions
+- Care plan tasks
+
+System uses this to match caregivers.
+
+========================================================
+AI MATCHING ENGINE
+========================================================
+
+Matches patient to caregiver using:
+
+- Skills
+- Certifications
+- Availability
+- Distance
+- Branch coverage
+- Language
+- Experience
+- Patient preference
+- Performance score
+- Overtime risk
+
+Output:
+
+Best Match 95%
+Second Match 88%
+Third Match 81%
+
+========================================================
+SUPERVISOR DASHBOARD
+========================================================
+
+Supervisor can see:
+
+- Branch patients
+- Branch caregivers
+- Cross-branch caregivers if approved
+- Active visits
+- Late visits
+- Missed visits
+- Open shifts
+- Claimed shifts
+- Pending approvals
+- Time entries
+- Incident reports
+- Compliance alerts
+- Training status
+- Performance reports
+
+========================================================
+ADMIN DASHBOARD
+========================================================
+
+Admin can see:
+
+- Total patients
+- Active caregivers
+- Open shifts
+- Completed visits
+- Missed visits
+- Revenue
+- Payroll estimate
+- Compliance score
+- EVV errors
+- Expiring credentials
+- Family messages
+- Patient satisfaction
+- Branch performance
+
+========================================================
+BILLING MODEL FOR SaaS
+========================================================
+
+Hybrid billing:
+
+Base agency fee
+
++
+
+Per active caregiver
+
++
+
+Per active patient
+
++
+
+Per branch
+
++
+
+Optional premium modules
+
+Premium modules:
+
+- AI scheduling
+- Payroll integration
+- White label
+- Advanced analytics
+- API access
+- Native mobile app
+- Advanced compliance
+- Multi-branch enterprise tools
+
+========================================================
+WHITE LABEL SYSTEM
+========================================================
+
+Agency can customize:
+
+- Logo
+- Colors
+- Domain
+- Email branding
+- Login page
+- Portal name
+- Mobile app branding later
+
+Example:
+
+miamicareagency.com
+
+instead of
+
+yourplatform.com
+
+========================================================
+MOBILE STRATEGY
+========================================================
+
+Phase 1:
+
+Responsive web app
+
+Works on:
+
+- Desktop
+- Tablet
+- Mobile browser
+
+Phase 2:
+
+Native mobile app
+
+- iOS
+- Android
+- Push notifications
+- GPS EVV
+- Offline visit notes
+- Mobile shift claiming
+
+========================================================
+DATABASE TABLES
+========================================================
+
+agencies
+branches
+users
+roles
+permissions
+patients
+patient_family_members
+caregivers
+clinical_staff
+employee_profiles
+employee_credentials
+employee_skills
+employee_availability
+schedules
+visits
+open_shifts
+shift_claims
+time_entries
+hours_ledger
+pay_periods
+payroll_exports
+mileage_entries
+pto_balances
+pto_requests
+care_plans
+visit_notes
+medical_records
+documents
+messages
+notifications
+audit_logs
+billing_plans
+subscriptions
+invoices
+payments
+agency_settings
+white_label_settings
+
+========================================================
+TIME ENTRY TABLE
+========================================================
+
+employee_time_entries
+
+Fields:
+
+id
+agency_id
+branch_id
+employee_id
+patient_id
+visit_id
+shift_id
+entry_type
+clock_in_time
+clock_out_time
+clock_in_gps
+clock_out_gps
+scheduled_start
+scheduled_end
+actual_hours
+regular_hours
+overtime_hours
+status
+submitted_at
+approved_by
+approved_at
+rejection_reason
+created_at
+updated_at
+
+========================================================
+HOURS LEDGER TABLE
+========================================================
+
+hours_ledger
+
+Fields:
+
+id
+agency_id
+branch_id
+employee_id
+pay_period_id
+source_type
+source_id
+regular_hours
+overtime_hours
+training_hours
+meeting_hours
+travel_hours
+total_hours
+pay_rate
+estimated_gross_pay
+status
+locked_at
+exported_at
+created_at
+
+========================================================
+PTO TABLE
+========================================================
+
+pto_balances
+
+Fields:
+
+id
+agency_id
+employee_id
+employee_type
+vacation_hours
+sick_hours
+holiday_hours
+floating_holiday_hours
+used_hours
+available_hours
+last_updated
+
+========================================================
+AUDIT LOG TABLE
+========================================================
+
+audit_logs
+
+Fields:
+
+id
+agency_id
+branch_id
+user_id
+role
+action
+target_type
+target_id
+old_value
+new_value
+ip_address
+device
+created_at
+
+Log events:
+
+- Patient viewed
+- Medical record viewed
+- Shift claimed
+- Shift approved
+- Clock-in
+- Clock-out
+- Time entry changed
+- Payroll approved
+- Mileage approved
+- PTO approved
+- Document downloaded
+- Message sent
+
+========================================================
+SECURITY RULES
+========================================================
+
+Never rely only on frontend hiding.
+
+Security must happen at:
+
+- Database level
+- Backend API level
+- Role permission level
+- Row-level filtering
+- Audit logging level
+
+Every request checks:
+
+1. Is user logged in?
+2. What agency?
+3. What branch?
+4. What role?
+5. What permission?
+6. Is the patient assigned?
+7. Is the shift approved?
+8. Is medical access allowed?
+9. Should this action be logged?
+
+If not allowed:
+
+Access denied.
+
+========================================================
+IMPLEMENTATION PHASES
+========================================================
+
+PHASE 1: FOUNDATION
+
+- Authentication
+- Roles
+- Permissions
+- Agency isolation
+- Branch isolation
+- User profiles
+- Patient profiles
+- Caregiver profiles
+
+PHASE 2: SCHEDULING
+
+- Create shifts
+- Assign caregivers
+- Open shift marketplace
+- Scheduler approval
+- Caregiver schedule
+
+PHASE 3: HOURS ENGINE
+
+- Clock-in
+- Clock-out
+- GPS EVV
+- Time entries
+- Hours dashboard
+- Supervisor approval
+
+PHASE 4: PAYROLL READINESS
+
+- Pay rates
+- Mileage
+- Overtime
+- PTO
+- Pay period summary
+- Payroll export
+
+PHASE 5: PORTALS
+
+- Patient portal
+- Family portal
+- Caregiver portal
+- Supervisor portal
+- Scheduler portal
+
+PHASE 6: COMPLIANCE
+
+- Credentials
+- Training
+- Expiration alerts
+- AHCA readiness
+- Audit logs
+
+PHASE 7: BILLING
+
+- SaaS plans
+- Stripe integration
+- Agency subscriptions
+- Invoices
+- White label billing
+
+PHASE 8: MOBILE
+
+- Responsive web
+- Native iOS
+- Native Android
+- Push notifications
+- Offline mode
+
+PHASE 9: AI
+
+- AI scheduling
+- AI shift filling
+- AI overtime prediction
+- AI caregiver matching
+- AI burnout detection
+- AI compliance alerts
+
+========================================================
+FINAL PRODUCT VISION
+========================================================
+
+This system becomes:
+
+Home Health Care Agency Operating System
+
++
+
+Workforce Management System
+
++
+
+Scheduling System
+
++
+
+EVV System
+
++
+
+Hours Worked System
+
++
+
+Payroll Readiness System
+
++
+
+Patient Portal
+
++
+
+Family Portal
+
++
+
+Caregiver Portal
+
++
+
+Compliance System
+
++
+
+Multi-Agency SaaS Platform
+
+The main rule:
+
+Every person sees only what they are allowed to see.
+
+Caregiver sees their work.
+Patient sees their own care.
+Family sees approved patient information.
+Supervisor sees branch operations.
+Agency admin sees agency operations.
+Platform owner manages the SaaS.
+========================================================
+HOME HEALTH CARE AGENCY SaaS
+AGENCY CONFIGURATION CENTER
+MASTER ARCHITECTURE
+========================================================
+
+PURPOSE
+
+The Agency Configuration Center is the heart of the
+multi-tenant SaaS architecture.
+
+It allows each agency to customize how the platform
+looks, behaves, and operates without changing code.
+
+The platform has:
+
+ONE CODEBASE
+ONE BACKEND
+ONE DATABASE CLUSTER
+ONE DEPLOYMENT
+
+Each agency receives its own:
+
+Branding
+Policies
+Workflows
+Services
+Permissions
+Forms
+Reports
+Portal Experience
+
+through configuration only.
+
+========================================================
+AGENCY CONFIGURATION CENTER
+========================================================
+
+Agency Configuration
+
+├── Organization
+├── Branches
+├── Branding
+├── Services
+├── Workforce
+├── Scheduling
+├── Payroll
+├── PTO
+├── Compliance
+├── Patient Portal
+├── Family Portal
+├── Forms
+├── Documents
+├── Roles & Permissions
+├── Notifications
+├── Billing
+├── Integrations
+├── AI Settings
+├── White Label
+└── Feature Flags
+
+========================================================
+ORGANIZATION SETTINGS
+========================================================
+
+Agency Name
+
+Agency DBA
+
+Agency License Number
+
+AHCA License
+
+NPI Number
+
+Tax ID
+
+Agency Address
+
+Agency Phone
+
+Agency Email
+
+Website
+
+Timezone
+
+Language
+
+Support Contact
+
+Business Hours
+
+Emergency Contact
+
+========================================================
+BRANCH CONFIGURATION
+========================================================
+
+Branch Name
+
+Branch Manager
+
+Branch Address
+
+Coverage Area
+
+Service Zip Codes
+
+Operating Hours
+
+Emergency Contact
+
+Status
+
+Examples
+
+Miami Branch
+
+Coverage:
+33101
+33102
+33103
+
+Orlando Branch
+
+Coverage:
+32801
+32803
+32804
+
+========================================================
+BRANDING CONFIGURATION
+========================================================
+
+Agency Logo
+
+Favicon
+
+Primary Color
+
+Secondary Color
+
+Background Style
+
+Portal Name
+
+Login Banner
+
+Email Header
+
+PDF Header
+
+PDF Footer
+
+Agency Signature
+
+========================================================
+SERVICE CATALOG
+========================================================
+
+Agency selects services offered.
+
+Examples
+
+Companionship
+
+Meal Preparation
+
+Transportation
+
+Light Housekeeping
+
+Laundry
+
+Bathing Assistance
+
+Dressing Assistance
+
+Mobility Assistance
+
+Medication Reminder
+
+Respite Care
+
+Post Surgery Care
+
+Dementia Care
+
+Veteran Care
+
+Each service contains:
+
+Name
+
+Description
+
+Status
+
+Price
+
+Duration
+
+Required Skill
+
+========================================================
+WORKFORCE CONFIGURATION
+========================================================
+
+Employee Types Enabled
+
+HHA
+
+CNA
+
+Companion
+
+Homemaker
+
+Med Tech
+
+Medical Assistant
+
+LPN
+
+RN
+
+Physician
+
+Agency defines:
+
+Employee Requirements
+
+Training Requirements
+
+Credential Requirements
+
+Skill Requirements
+
+========================================================
+SCHEDULING CONFIGURATION
+========================================================
+
+Minimum Shift Length
+
+Maximum Shift Length
+
+Recurring Shifts
+
+Weekend Scheduling
+
+Holiday Scheduling
+
+Cross Branch Scheduling
+
+Open Shift Marketplace
+
+Shift Approval Rules
+
+Visit Buffer Rules
+
+Travel Time Rules
+
+Overtime Warnings
+
+========================================================
+PAYROLL CONFIGURATION
+========================================================
+
+Pay Period
+
+Weekly
+
+Biweekly
+
+Semi-Monthly
+
+Monthly
+
+Overtime Rules
+
+Mileage Rules
+
+Holiday Pay Rules
+
+Weekend Pay Rules
+
+Differential Pay Rules
+
+Contractor Rules
+
+Payroll Export Rules
+
+========================================================
+PTO CONFIGURATION
+========================================================
+
+Vacation Policy
+
+Sick Time Policy
+
+Holiday Policy
+
+Floating Holiday Policy
+
+Accrual Rules
+
+Carryover Rules
+
+Expiration Rules
+
+Approval Rules
+
+Employee Type Rules
+
+========================================================
+COMPLIANCE CONFIGURATION
+========================================================
+
+Required Credentials
+
+CPR
+
+Driver License
+
+Auto Insurance
+
+Background Check
+
+TB Test
+
+Drug Screening
+
+CNA License
+
+HHA Certification
+
+Med Tech Certification
+
+RN License
+
+LPN License
+
+Expiration Alerts
+
+30 Days
+
+60 Days
+
+90 Days
+
+========================================================
+PATIENT PORTAL CONFIGURATION
+========================================================
+
+Agency controls visibility.
+
+Patient may see:
+
+Schedule
+
+Visit History
+
+Assigned Caregiver
+
+Care Plan Summary
+
+Messages
+
+Invoices
+
+Documents
+
+Appointments
+
+Notifications
+
+Each item can be:
+
+Enabled
+
+Disabled
+
+Read Only
+
+========================================================
+FAMILY PORTAL CONFIGURATION
+========================================================
+
+Family may see:
+
+Schedule
+
+Visit Status
+
+Caregiver Name
+
+Care Notes
+
+Documents
+
+Invoices
+
+Messages
+
+Care Plan Summary
+
+Emergency Updates
+
+Each item configurable.
+
+========================================================
+FORMS BUILDER
+========================================================
+
+Agency creates forms without coding.
+
+Examples
+
+Patient Intake
+
+Incident Report
+
+Complaint Form
+
+Employee Evaluation
+
+Care Assessment
+
+Medication Form
+
+Emergency Contact Form
+
+Quality Assurance Form
+
+Each form supports:
+
+Text
+
+Dropdown
+
+Checkbox
+
+Signature
+
+Date
+
+File Upload
+
+Conditional Logic
+
+========================================================
+DOCUMENT LIBRARY
+========================================================
+
+Agency-specific documents.
+
+Examples
+
+Employee Handbook
+
+Agency Policies
+
+Emergency Plans
+
+Care Agreements
+
+Consent Forms
+
+Training Materials
+
+Compliance Documents
+
+Patient Forms
+
+Employee Contracts
+
+========================================================
+ROLES & PERMISSIONS
+========================================================
+
+Default Roles
+
+Agency Owner
+
+Administrator
+
+Supervisor
+
+Scheduler
+
+Recruiter
+
+HR
+
+Payroll
+
+Compliance
+
+Caregiver
+
+Patient
+
+Family
+
+Agency may create:
+
+Training Coordinator
+
+Regional Manager
+
+Quality Assurance Manager
+
+Clinical Lead
+
+Operations Manager
+
+Custom Permissions:
+
+View
+
+Create
+
+Edit
+
+Delete
+
+Approve
+
+Export
+
+========================================================
+NOTIFICATION CONFIGURATION
+========================================================
+
+Credential Expiration
+
+Visit Reminders
+
+Shift Reminders
+
+Missed Visit Alerts
+
+Overtime Alerts
+
+Compliance Alerts
+
+Family Notifications
+
+Patient Notifications
+
+Emergency Notifications
+
+Delivery Methods
+
+Email
+
+SMS
+
+Push Notification
+
+In-App Notification
+
+========================================================
+BILLING CONFIGURATION
+========================================================
+
+Agency Subscription
+
+Current Plan
+
+Storage Limits
+
+Patient Limits
+
+Caregiver Limits
+
+AI Limits
+
+Additional Modules
+
+Billing Contacts
+
+Invoice Preferences
+
+Payment Methods
+
+========================================================
+INTEGRATION CONFIGURATION
+========================================================
+
+QuickBooks
+
+Stripe
+
+ADP
+
+Gusto
+
+Paychex
+
+Twilio
+
+DocuSign
+
+Google Calendar
+
+Microsoft 365
+
+Outlook
+
+Zoom
+
+Future Integrations
+
+========================================================
+AI CONFIGURATION
+========================================================
+
+AI Scheduling
+
+AI Matching
+
+AI Compliance Monitoring
+
+AI Staffing Forecast
+
+AI Burnout Detection
+
+AI Documentation Assistant
+
+AI Revenue Forecast
+
+AI Quality Monitoring
+
+Agency chooses which modules are active.
+
+========================================================
+WHITE LABEL CONFIGURATION
+========================================================
+
+Agency Logo
+
+Agency Colors
+
+Agency Domain
+
+Agency Email Branding
+
+Agency PDF Branding
+
+Agency Login Page
+
+Agency Portal Name
+
+Agency Mobile Branding
+
+Agency SMS Branding
+
+========================================================
+FEATURE FLAG SYSTEM
+========================================================
+
+Allows agencies to enable or disable features.
+
+Examples
+
+AI Scheduling
+
+Open Shift Marketplace
+
+Payroll Module
+
+Family Portal
+
+Patient Portal
+
+Mileage Tracking
+
+Compliance Tracking
+
+Advanced Analytics
+
+White Label
+
+Mobile App
+
+Same software.
+
+Different feature sets.
+
+========================================================
+MULTI-TENANT DATABASE STRUCTURE
+========================================================
+
+agency_settings
+
+agency_branding
+
+agency_branches
+
+agency_services
+
+agency_roles
+
+agency_permissions
+
+agency_forms
+
+agency_documents
+
+agency_notifications
+
+agency_compliance_rules
+
+agency_integrations
+
+agency_feature_flags
+
+agency_billing_settings
+
+agency_ai_settings
+
+========================================================
+SYSTEM WORKFLOW
+========================================================
+
+User Visits Agency Portal
+
+↓
+
+System Detects Agency
+
+↓
+
+Load Agency Record
+
+↓
+
+Load Agency Branding
+
+↓
+
+Load Agency Features
+
+↓
+
+Load Agency Permissions
+
+↓
+
+Load Agency Settings
+
+↓
+
+Generate Agency Experience
+
+↓
+
+Display Dashboard
+
+========================================================
+EXAMPLE
+========================================================
+
+Agency A
+
+Logo:
+ABC Home Care
+
+Color:
+Green
+
+Features:
+AI Scheduling ON
+Family Portal ON
+
+Services:
+Companionship
+Transportation
+
+--------------------------------------------------------
+
+Agency B
+
+Logo:
+Sunrise Care
+
+Color:
+Purple
+
+Features:
+AI Scheduling OFF
+Family Portal OFF
+
+Services:
+Dementia Care
+Respite Care
+
+--------------------------------------------------------
+
+Same platform.
+
+Same code.
+
+Different experience.
+
+========================================================
+FINAL PRINCIPLE
+========================================================
+
+DO NOT CUSTOMIZE CODE FOR AGENCIES.
+
+CUSTOMIZE CONFIGURATION.
+
+Platform Core
+      ↓
+Agency Configuration
+      ↓
+Agency Experience
+
+This allows one codebase to serve hundreds or thousands
+of agencies while making each agency feel like they have
+their own custom-built software.
+========================================================

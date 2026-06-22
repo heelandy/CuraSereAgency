@@ -4,15 +4,22 @@ import { HeartIcon } from "./icons";
 
 // Presentational, hook-free → usable from server components.
 
-export function Logo({ withText = true, light = false }: { withText?: boolean; light?: boolean }) {
+export function Logo({
+  withText = true, light = false, name, logoUrl,
+}: { withText?: boolean; light?: boolean; name?: string | null; logoUrl?: string | null }) {
   return (
     <span className="inline-flex items-center gap-2">
-      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-600 text-white">
-        <HeartIcon width={20} height={20} />
-      </span>
+      {logoUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={logoUrl} alt="" className="h-9 w-9 rounded-xl object-cover" />
+      ) : (
+        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-600 text-white">
+          <HeartIcon width={20} height={20} />
+        </span>
+      )}
       {withText && (
         <span className={`text-lg font-semibold tracking-tight ${light ? "text-white" : "text-surface-900"}`}>
-          Cura<span className="text-brand-600">_Sera</span>
+          {name ? name : <>Cura<span className="text-brand-600">_Sera</span></>}
         </span>
       )}
     </span>
@@ -67,8 +74,8 @@ export function Badge({ tone = "neutral", children }: { tone?: string; children:
 }
 
 export function StatCard({
-  label, value, hint, icon, tone = "green",
-}: { label: string; value: ReactNode; hint?: string; icon?: ReactNode; tone?: string }) {
+  label, value, hint, icon, tone = "green", href,
+}: { label: string; value: ReactNode; hint?: string; icon?: ReactNode; tone?: string; href?: string }) {
   const chip: Record<string, string> = {
     green: "bg-brand-50 text-brand-600",
     amber: "bg-amber-50 text-amber-600",
@@ -76,18 +83,24 @@ export function StatCard({
     blue: "bg-sky-50 text-sky-600",
     violet: "bg-violet-50 text-violet-600",
   };
-  return (
-    <div className="card card-pad">
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-sm font-medium text-surface-500">{label}</p>
-          <p className="mt-1 text-2xl font-semibold text-surface-900">{value}</p>
-          {hint && <p className="mt-1 text-xs text-surface-400">{hint}</p>}
-        </div>
-        {icon && <span className={`icon-chip ${chip[tone] ?? chip.green}`}>{icon}</span>}
+  const inner = (
+    <div className="flex items-start justify-between">
+      <div>
+        <p className="text-sm font-medium text-surface-500">{label}</p>
+        <p className="mt-1 text-2xl font-semibold text-surface-900">{value}</p>
+        {hint && <p className="mt-1 text-xs text-surface-400">{hint}</p>}
       </div>
+      {icon && <span className={`icon-chip ${chip[tone] ?? chip.green}`}>{icon}</span>}
     </div>
   );
+  if (href) {
+    return (
+      <Link href={href} className="card card-pad block transition-shadow hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-brand-200">
+        {inner}
+      </Link>
+    );
+  }
+  return <div className="card card-pad">{inner}</div>;
 }
 
 export function EmptyState({ title, hint, icon }: { title: string; hint?: string; icon?: ReactNode }) {

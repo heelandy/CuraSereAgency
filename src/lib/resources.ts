@@ -2,6 +2,7 @@ import type { ResourceConfig } from "./resource";
 import * as V from "./validation";
 import { prisma } from "./prisma";
 import { Errors } from "./http";
+import { patientAssignmentScoped, seesAllBranches } from "./authz";
 
 // Central registry of every CRUD resource. Route files import a config by key;
 // pages import the matching field/column defs from components/resource-defs.
@@ -18,6 +19,21 @@ export const resources = {
     readCap: "admin:manage", writeCap: "admin:manage",
     schema: V.branchSchema, orderBy: { name: "asc" },
   },
+  services: {
+    delegate: "service", rateScope: "service",
+    readCap: "admin:manage", writeCap: "admin:manage",
+    schema: V.serviceSchema, orderBy: { name: "asc" },
+  },
+  forms: {
+    delegate: "formTemplate", rateScope: "form",
+    readCap: "admin:manage", writeCap: "admin:manage",
+    schema: V.formTemplateSchema, orderBy: { name: "asc" },
+  },
+  "pto-balances": {
+    delegate: "ptoBalance", rateScope: "ptoBalance",
+    readCap: "payroll:read", writeCap: "payroll:write",
+    schema: V.ptoBalanceSchema, include: { caregiver: caregiverName },
+  },
   departments: {
     delegate: "department", rateScope: "department",
     readCap: "admin:manage", writeCap: "admin:manage",
@@ -29,6 +45,15 @@ export const resources = {
     delegate: "patient", rateScope: "patient",
     readCap: "patients:read", writeCap: "patients:write",
     schema: V.patientSchema, orderBy: { lastName: "asc" },
+    auditView: true,
+    // Isolation: assignment-scoped roles see only assigned patients; other
+    // branch-bound roles see only their branch; agency-wide roles see all.
+    listWhere: (ctx) =>
+      patientAssignmentScoped(ctx.role)
+        ? { visits: { some: { caregiver: { userId: ctx.userId } } } }
+        : !seesAllBranches(ctx.role) && ctx.branchId
+          ? { branchId: ctx.branchId }
+          : {},
   },
   "emergency-contacts": {
     delegate: "emergencyContact", rateScope: "emergencyContact",
@@ -38,13 +63,14 @@ export const resources = {
   },
   insurance: {
     delegate: "insurancePolicy", rateScope: "insurance",
-    readCap: "patients:read", writeCap: "patients:write",
+    readCap: "billing:read", writeCap: "billing:write",
     schema: V.insurancePolicySchema,
     scope: { mode: "parent", relation: "patient", fkField: "patientId", parentDelegate: "patient" },
+    encryptFields: ["memberId"], // PHI encrypted at rest (AES-256-GCM)
   },
   diagnoses: {
     delegate: "diagnosis", rateScope: "diagnosis",
-    readCap: "patients:read", writeCap: "patients:write",
+    readCap: "clinical:read", writeCap: "clinical:write", // Level-2 clinical data
     schema: V.diagnosisSchema,
     scope: { mode: "parent", relation: "patient", fkField: "patientId", parentDelegate: "patient" },
   },
@@ -56,13 +82,13 @@ export const resources = {
   },
   medications: {
     delegate: "medication", rateScope: "medication",
-    readCap: "patients:read", writeCap: "patients:write",
+    readCap: "clinical:read", writeCap: "clinical:write", // Level-2 clinical data
     schema: V.medicationSchema,
     scope: { mode: "parent", relation: "patient", fkField: "patientId", parentDelegate: "patient" },
   },
   physicians: {
     delegate: "physician", rateScope: "physician",
-    readCap: "patients:read", writeCap: "patients:write",
+    readCap: "clinical:read", writeCap: "clinical:write", // Level-2 clinical data
     schema: V.physicianSchema,
     scope: { mode: "parent", relation: "patient", fkField: "patientId", parentDelegate: "patient" },
   },
@@ -72,6 +98,7 @@ export const resources = {
     delegate: "caregiver", rateScope: "caregiver",
     readCap: "caregivers:read", writeCap: "caregivers:write",
     schema: V.caregiverSchema, orderBy: { lastName: "asc" },
+    branchField: "branchId", // branch-bound roles see only their branch's caregivers
   },
   certifications: {
     delegate: "certification", rateScope: "certification",
@@ -97,27 +124,54 @@ export const resources = {
     delegate: "visit", rateScope: "visit",
     readCap: "scheduling:read", writeCap: "scheduling:write",
     schema: V.visitSchema,
-    include: { patient: patientName, caregiver: caregiverName },
+    include: { patient: patientName, caregiver: caregiverName, evv: true },
     orderBy: { scheduledStart: "desc" },
-    // Service Authorization Engine (Phase 28): block visits against an
-    // authorization that is inactive or out of hours.
-    validate: async (data, ctx) => {
+    validate: async (data, ctx, mode, existing) => {
+      // Service Authorization Engine (Phase 28): block against an authorization
+      // that is inactive or out of hours (only when an auth is being set).
       const authId = data.serviceAuthId;
-      if (typeof authId !== "string" || !authId) return;
-      const auth = await prisma.serviceAuthorization.findFirst({
-        where: { id: authId, agencyId: ctx.agencyId },
-      });
-      if (!auth) throw Errors.notFound("Service authorization not found");
-      if (auth.status !== "ACTIVE") throw Errors.badRequest("Authorization is not active — cannot schedule");
-      if (auth.usedHours >= auth.approvedHours) throw Errors.badRequest("Authorized hours exhausted — cannot schedule");
-      if (auth.endDate && new Date(auth.endDate) < new Date()) throw Errors.badRequest("Authorization expired — cannot schedule");
+      if (typeof authId === "string" && authId) {
+        const auth = await prisma.serviceAuthorization.findFirst({ where: { id: authId, agencyId: ctx.agencyId } });
+        if (!auth) throw Errors.notFound("Service authorization not found");
+        if (auth.status !== "ACTIVE") throw Errors.badRequest("Authorization is not active — cannot schedule");
+        if (auth.usedHours >= auth.approvedHours) throw Errors.badRequest("Authorized hours exhausted — cannot schedule");
+        if (auth.endDate && new Date(auth.endDate) < new Date()) throw Errors.badRequest("Authorization expired — cannot schedule");
+      }
+
+      // 48-hour rule: within 48h of start, only senior roles may change the
+      // caregiver or the time (delete still allowed via DELETE).
+      if (mode === "update" && existing) {
+        const start = new Date(existing.scheduledStart as string);
+        const ms = start.getTime() - Date.now();
+        const within48 = ms > 0 && ms < 48 * 3_600_000;
+        const SENIOR = ["AGENCY_OWNER", "PLATFORM_OWNER", "AGENCY_ADMIN", "SCHEDULER"];
+        const changingSchedule =
+          data.caregiverId !== undefined || data.scheduledStart !== undefined || data.scheduledEnd !== undefined;
+        if (within48 && changingSchedule && !SENIOR.includes(ctx.role)) {
+          throw Errors.forbidden("Visits within 48 hours can only be rescheduled by a scheduler, admin or owner.");
+        }
+      }
+
+      // Scope of practice: an assigned caregiver must be qualified for the service.
+      const caregiverId = (data.caregiverId ?? existing?.caregiverId) as string | null | undefined;
+      const serviceType = (data.serviceType ?? existing?.serviceType ?? "PERSONAL_CARE") as string;
+      if (caregiverId) {
+        const cg = await prisma.caregiver.findFirst({
+          where: { id: caregiverId, agencyId: ctx.agencyId }, select: { discipline: true },
+        });
+        const REQUIRED: Record<string, string[]> = { SKILLED_NURSING: ["RN", "LPN"], THERAPY: ["THERAPIST", "RN"] };
+        const allowed = REQUIRED[serviceType];
+        if (cg && allowed && !allowed.includes(cg.discipline)) {
+          throw Errors.badRequest(`This ${serviceType.replace(/_/g, " ").toLowerCase()} visit requires ${allowed.join(" or ")}; ${cg.discipline} is not qualified.`);
+        }
+      }
     },
   },
 
   // ── Clinical / Care plans (Phase 5/32) ─────────────────────────────────────
   "visit-notes": {
     delegate: "visitNote", rateScope: "visitNote",
-    readCap: "clinical:read", writeCap: "clinical:write",
+    readCap: "care:read", writeCap: "care:write", // caregivers document their visits
     schema: V.visitNoteSchema,
     include: { patient: patientName },
     stamp: (ctx) => ({ authorId: ctx.userId }),
@@ -139,6 +193,24 @@ export const resources = {
     readCap: "clinical:read", writeCap: "clinical:write",
     schema: V.careGoalSchema,
     scope: { mode: "parent", relation: "carePlan", fkField: "carePlanId", parentDelegate: "carePlan" },
+  },
+
+  // ── Medication administration (Med Tech module) ────────────────────────────
+  "med-logs": {
+    delegate: "medicationLog", rateScope: "medLog",
+    readCap: "meds:read", writeCap: "meds:write", // only Med Tech / LPN / RN may administer
+    schema: V.medicationLogSchema,
+    include: { patient: patientName },
+    orderBy: { scheduledAt: "desc" },
+  },
+
+  // ── Care tasks (patient daily task lists) ──────────────────────────────────
+  "care-tasks": {
+    delegate: "careTask", rateScope: "careTask",
+    readCap: "care:read", writeCap: "care:write",
+    schema: V.careTaskSchema,
+    include: { patient: patientName },
+    orderBy: { createdAt: "desc" },
   },
 
   // ── Incidents (Phase 30) ───────────────────────────────────────────────────
@@ -200,6 +272,29 @@ export const resources = {
     schema: V.payrollSchema,
     include: { caregiver: caregiverName },
     orderBy: { periodStart: "desc" },
+  },
+
+  // ── Workforce: time entries / PTO / mileage (Hours/Payroll readiness) ──────
+  "time-entries": {
+    delegate: "timeEntry", rateScope: "timeEntry",
+    readCap: "payroll:read", writeCap: "payroll:write",
+    schema: V.timeEntrySchema,
+    include: { caregiver: caregiverName },
+    orderBy: { clockIn: "desc" },
+  },
+  pto: {
+    delegate: "ptoRequest", rateScope: "pto",
+    readCap: "payroll:read", writeCap: "payroll:write",
+    schema: V.ptoRequestSchema,
+    include: { caregiver: caregiverName },
+    orderBy: { createdAt: "desc" },
+  },
+  mileage: {
+    delegate: "mileageEntry", rateScope: "mileage",
+    readCap: "payroll:read", writeCap: "payroll:write",
+    schema: V.mileageEntrySchema,
+    include: { caregiver: caregiverName },
+    orderBy: { date: "desc" },
   },
 
   // ── HR / Onboarding (Phase 13/25) ──────────────────────────────────────────

@@ -31,7 +31,19 @@ async function main() {
       city: "Miami", state: "FL", zip: "33131",
       plan: "PROFESSIONAL", subscriptionStatus: "active",
       trialEndsAt: daysFromNow(30),
+      // White-label branding (teal default)
+      slug: "curasera", portalName: "Cura_Sera Home Care",
+      primaryColor: "#1f775c", secondaryColor: "#e6b566",
+      supportEmail: "care@curasera.com", supportPhone: "(305) 555-0142",
+      pdfFooter: "Cura_Sera Home Care — Confidential",
     },
+  });
+  // Domains that resolve to this tenant (localhost so logged-out dev shows branding).
+  await prisma.agencyDomain.createMany({
+    data: [
+      { agencyId: agency.id, domain: "localhost", isPrimary: true, verified: true },
+      { agencyId: agency.id, domain: "curasera.localhost", verified: true },
+    ],
   });
 
   const branch = await prisma.branch.create({
@@ -41,13 +53,20 @@ async function main() {
   await prisma.department.create({ data: { agencyId: agency.id, branchId: branch.id, name: "Personal Care" } });
 
   // ── Users ────────────────────────────────────────────────────────────────
+  // Names of the field-staff demo logins match the caregiver records they're
+  // linked to below (so the greeting + My Shifts line up). "caregiver" is too
+  // broad on its own — there's a discipline-specific account for RN/LPN/HHA/CNA.
   const users: [string, string, string][] = [
     ["Olivia Owner", "owner@curasera.com", "AGENCY_OWNER"],
     ["Aaron Admin", "admin@curasera.com", "AGENCY_ADMIN"],
     ["Dana Director", "director@curasera.com", "CLINICAL_DIRECTOR"],
     ["Nina Nurse", "nurse@curasera.com", "NURSE_SUPERVISOR"],
     ["Sam Scheduler", "scheduler@curasera.com", "SCHEDULER"],
-    ["Carla Caregiver", "caregiver@curasera.com", "CAREGIVER"],
+    ["James Okoro", "rn@curasera.com", "RN"],
+    ["Mei Lin", "lpn@curasera.com", "LPN"],
+    ["Carla Mendez", "hha@curasera.com", "HHA"],
+    ["Sofia Reyes", "cna@curasera.com", "CAREGIVER"],
+    ["David Klein", "caregiver@curasera.com", "CAREGIVER"],
     ["Bill Biller", "billing@curasera.com", "BILLING"],
     ["Hana HR", "hr@curasera.com", "HR"],
     ["Cody Compliance", "compliance@curasera.com", "COMPLIANCE"],
@@ -69,7 +88,7 @@ async function main() {
     ["Carla", "Mendez", "HHA", "ACTIVE", "English,Spanish", 18.5, 25.9, -80.19],
     ["James", "Okoro", "RN", "ACTIVE", "English", 38.0, 25.77, -80.13],
     ["Mei", "Lin", "LPN", "ACTIVE", "English,Mandarin", 29.0, 25.82, -80.22],
-    ["Sofia", "Reyes", "CNA", "ONBOARDING", "English,Spanish", 17.0, 25.86, -80.3],
+    ["Sofia", "Reyes", "CNA", "ACTIVE", "English,Spanish", 17.0, 25.86, -80.3],
     ["David", "Klein", "COMPANION", "ACTIVE", "English", 16.0, 25.7, -80.28],
   ] as const;
   const caregivers = [];
@@ -252,8 +271,163 @@ async function main() {
   await prisma.aiInsight.create({ data: { agencyId: agency.id, module: "FALL_RISK", title: "Elevated fall risk: Margaret Thompson", body: "Recent assessment indicates HIGH fall risk. Recommend home safety evaluation.", severity: "CRITICAL", entityType: "PATIENT", entityId: patients[0].id } });
   await prisma.aiInsight.create({ data: { agencyId: agency.id, module: "REVENUE_FORECAST", title: "Projected revenue up 8% next month", body: "Based on current referral pipeline and authorized hours.", severity: "INFO" } });
 
+  // ── Workforce / matching / portal demo data ────────────────────────────────
+  await prisma.patient.update({ where: { id: patients[0].id }, data: { requiredSkills: "Bathing,Dementia Care", genderPreference: "FEMALE" } });
+  await prisma.caregiver.update({ where: { id: caregivers[0].id }, data: { gender: "FEMALE", yearsExperience: 6 } });
+  await prisma.caregiver.update({ where: { id: caregivers[1].id }, data: { gender: "MALE", yearsExperience: 9 } });
+  await prisma.caregiver.update({ where: { id: caregivers[2].id }, data: { gender: "FEMALE", yearsExperience: 4 } });
+
+  // Link each field-staff demo login to a caregiver record (enables My Shifts +
+  // marketplace + EVV). One discipline-specific login per caregiver type.
+  const caregiverLinks: [string, number][] = [
+    ["rn@curasera.com", 1],        // James Okoro — RN
+    ["lpn@curasera.com", 2],       // Mei Lin — LPN
+    ["hha@curasera.com", 0],       // Carla Mendez — HHA
+    ["cna@curasera.com", 3],       // Sofia Reyes — CNA
+    ["caregiver@curasera.com", 4], // David Klein — Companion (generic caregiver)
+  ];
+  for (const [email, idx] of caregiverLinks) {
+    const u = await prisma.user.findFirst({ where: { agencyId: agency.id, email } });
+    if (u) await prisma.caregiver.update({ where: { id: caregivers[idx].id }, data: { userId: u.id } });
+  }
+
+  // Guarantee every linked caregiver has upcoming assigned shifts (so each demo
+  // My Shifts has data), respecting scope of practice (RN/LPN → skilled nursing).
+  for (let i = 0; i < caregivers.length; i++) {
+    const cg = caregivers[i];
+    const skilled = cg.discipline === "RN" || cg.discipline === "LPN";
+    for (const dayOffset of [0, 2]) {
+      const start = daysFromNow(dayOffset, 10 + i, 0);
+      const end = new Date(start.getTime() + 2 * 3600_000);
+      await prisma.visit.create({
+        data: {
+          agencyId: agency.id, patientId: patients[i % patients.length].id, caregiverId: cg.id,
+          serviceType: skilled ? "SKILLED_NURSING" : "PERSONAL_CARE",
+          status: "SCHEDULED",
+          scheduledStart: start, scheduledEnd: end,
+        },
+      });
+    }
+  }
+
+  // Recurring visit template (expand via Scheduling → "Generate recurring")
+  await prisma.visit.create({
+    data: {
+      agencyId: agency.id, patientId: patients[0].id, caregiverId: caregivers[0].id,
+      serviceType: "PERSONAL_CARE", status: "SCHEDULED",
+      scheduledStart: daysFromNow(1, 9, 0), scheduledEnd: daysFromNow(1, 11, 0),
+      isRecurring: true, recurrenceRule: "WEEKLY:MO,WE,FR",
+    },
+  });
+
+  // Care tasks (daily task list)
+  await prisma.careTask.createMany({
+    data: [
+      { agencyId: agency.id, patientId: patients[0].id, title: "Assist with bathing", timeOfDay: "MORNING", status: "DONE", completedAt: daysFromNow(0, 9) },
+      { agencyId: agency.id, patientId: patients[0].id, title: "Medication reminder", timeOfDay: "AFTERNOON", status: "PENDING" },
+      { agencyId: agency.id, patientId: patients[0].id, title: "Evening safety check", timeOfDay: "EVENING", status: "PENDING" },
+    ],
+  });
+
+  // Medication administration logs (Med Tech)
+  await prisma.medicationLog.createMany({
+    data: [
+      { agencyId: agency.id, patientId: patients[0].id, medicationName: "Metformin 500mg", status: "GIVEN", scheduledAt: daysFromNow(-1, 8), administeredAt: daysFromNow(-1, 8) },
+      { agencyId: agency.id, patientId: patients[0].id, medicationName: "Lisinopril 10mg", status: "MISSED", scheduledAt: daysFromNow(-1, 20) },
+      { agencyId: agency.id, patientId: patients[1].id, medicationName: "Atorvastatin 20mg", status: "SCHEDULED", scheduledAt: daysFromNow(1, 8) },
+    ],
+  });
+
+  // Pending portal schedule request + owner notification
+  if (patientUser) {
+    await prisma.scheduleRequest.create({
+      data: {
+        agencyId: agency.id, patientId: patients[0].id, requestedById: patientUser.id, requestedByName: patientUser.name,
+        type: "RESCHEDULE", message: "Could we move my Friday morning visit to the afternoon?", preferredDate: daysFromNow(5),
+      },
+    });
+    const owner = await prisma.user.findFirst({ where: { agencyId: agency.id, role: "AGENCY_OWNER" } });
+    if (owner) {
+      await prisma.notification.create({
+        data: { agencyId: agency.id, userId: owner.id, kind: "REQUEST", title: "New schedule request", body: "Margaret Thompson: reschedule visit", href: "/dashboard/requests" },
+      });
+    }
+  }
+
+  // Time entries + mileage per caregiver; a PTO request.
+  for (const cg of caregivers) {
+    await prisma.timeEntry.create({
+      data: { agencyId: agency.id, caregiverId: cg.id, entryType: "VISIT", clockIn: daysFromNow(-2, 9), clockOut: daysFromNow(-2, 11), regularHours: 2, status: "APPROVED" },
+    });
+    await prisma.mileageEntry.create({
+      data: { agencyId: agency.id, caregiverId: cg.id, date: daysFromNow(-2), miles: 14 + Math.floor(Math.random() * 20), type: "PATIENT_TO_PATIENT", status: "SUBMITTED" },
+    });
+  }
+  await prisma.ptoRequest.create({
+    data: { agencyId: agency.id, caregiverId: caregivers[0].id, type: "VACATION", hours: 16, startDate: daysFromNow(10), endDate: daysFromNow(12), status: "REQUESTED" },
+  });
+
+  // ── SECOND AGENCY (white-label demo) ───────────────────────────────────────
+  // Same codebase, different DATA → different brand. Visit http://sunrise.localhost:3000
+  // (or sunrisecare.localhost) to see Sunrise's blue theme + portal name on login.
+  const sunrise = await prisma.agency.create({
+    data: {
+      name: "Sunrise Care", legalName: "Sunrise Care Services LLC", networkId: network.id,
+      email: "hello@sunrisecare.com", phone: "(407) 555-0199",
+      addressLine: "55 Orange Ave", city: "Orlando", state: "FL", zip: "32801",
+      plan: "STARTER", subscriptionStatus: "active", trialEndsAt: daysFromNow(30),
+      slug: "sunrise", portalName: "Sunrise Care Portal",
+      primaryColor: "#2563eb", secondaryColor: "#f59e0b",
+      supportEmail: "support@sunrisecare.com", supportPhone: "(407) 555-0199",
+      pdfFooter: "Sunrise Care — Confidential",
+    },
+  });
+  await prisma.agencyDomain.createMany({
+    data: [
+      { agencyId: sunrise.id, domain: "sunrise.localhost", isPrimary: true, verified: true },
+      { agencyId: sunrise.id, domain: "sunrisecare.localhost", verified: true },
+    ],
+  });
+  const sBranch = await prisma.branch.create({ data: { agencyId: sunrise.id, name: "Orlando Main", city: "Orlando", state: "FL", zip: "32801" } });
+  for (const [name, email, role] of [
+    ["Sara Sunrise", "owner@sunrisecare.com", "AGENCY_OWNER"],
+    ["Steve Scheduler", "scheduler@sunrisecare.com", "SCHEDULER"],
+  ] as [string, string, string][]) {
+    await prisma.user.create({ data: { agencyId: sunrise.id, branchId: sBranch.id, name, email, role, passwordHash: pw } });
+  }
+  const sCaregivers = [];
+  for (const [first, last, disc] of [["Nora", "Bell", "RN"], ["Hugo", "Diaz", "HHA"]] as [string, string, string][]) {
+    sCaregivers.push(await prisma.caregiver.create({
+      data: {
+        agencyId: sunrise.id, branchId: sBranch.id, firstName: first, lastName: last, discipline: disc,
+        status: "ACTIVE", languages: "English", hourlyRate: disc === "RN" ? 39 : 18, city: "Orlando", state: "FL", maxHoursPerWeek: 40,
+      },
+    }));
+  }
+  const sPatients = [];
+  for (const [first, last] of [["Arthur", "Bishop"], ["Edith", "Cole"]] as [string, string][]) {
+    sPatients.push(await prisma.patient.create({
+      data: {
+        agencyId: sunrise.id, branchId: sBranch.id, firstName: first, lastName: last, status: "ACTIVE",
+        addressLine: "12 Lake St", city: "Orlando", state: "FL", zip: "32801", admittedAt: daysFromNow(-40),
+      },
+    }));
+  }
+  for (let i = 0; i < 4; i++) {
+    const cg = sCaregivers[i % sCaregivers.length];
+    const start = daysFromNow(i, 9 + i, 0);
+    await prisma.visit.create({
+      data: {
+        agencyId: sunrise.id, patientId: sPatients[i % sPatients.length].id, caregiverId: cg.id,
+        serviceType: cg.discipline === "RN" ? "SKILLED_NURSING" : "PERSONAL_CARE", status: "SCHEDULED",
+        scheduledStart: start, scheduledEnd: new Date(start.getTime() + 2 * 3600_000),
+      },
+    });
+  }
+
   console.log("Seed complete.");
-  console.log("Login with owner@curasera.com / password123 (and other demo accounts).");
+  console.log("Cura_Sera: owner@curasera.com / password123 (http://localhost:3000)");
+  console.log("Sunrise (white-label): owner@sunrisecare.com / password123 (http://sunrise.localhost:3000)");
 }
 
 main()

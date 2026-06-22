@@ -14,18 +14,22 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        // CSS-variable-backed so a single per-agency primary color re-themes the
+        // entire app at runtime (white-label). Channel format preserves Tailwind
+        // alpha utilities (bg-brand-600/50). Defaults live in globals.css :root;
+        // per-agency overrides are emitted by <BrandStyle/>.
         brand: {
-          50: "#effaf6",
-          100: "#d8f1e6",
-          200: "#b3e3ce",
-          300: "#82cdb0",
-          400: "#4fb08e",
-          500: "#2d9472",
-          600: "#1f775c", // primary teal (buttons, headers)
-          700: "#1b5f4b",
-          800: "#194c3d",
-          900: "#163f34",
-          950: "#0a241e",
+          50: "rgb(var(--brand-50) / <alpha-value>)",
+          100: "rgb(var(--brand-100) / <alpha-value>)",
+          200: "rgb(var(--brand-200) / <alpha-value>)",
+          300: "rgb(var(--brand-300) / <alpha-value>)",
+          400: "rgb(var(--brand-400) / <alpha-value>)",
+          500: "rgb(var(--brand-500) / <alpha-value>)",
+          600: "rgb(var(--brand-600) / <alpha-value>)", // primary
+          700: "rgb(var(--brand-700) / <alpha-value>)",
+          800: "rgb(var(--brand-800) / <alpha-value>)",
+          900: "rgb(var(--brand-900) / <alpha-value>)",
+          950: "rgb(var(--brand-950) / <alpha-value>)",
         },
         surface: {
           50: "#fbfaf8",

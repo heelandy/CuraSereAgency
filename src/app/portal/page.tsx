@@ -1,6 +1,8 @@
 import { requireUser } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
 import { SectionCard, Badge, EmptyState } from "@/components/ui";
+import { PortalRequests } from "@/components/PortalRequests";
+import { FamilyAccess } from "@/components/FamilyAccess";
 import { CalendarIcon, HeartIcon } from "@/components/icons";
 import { fmtDateTime, fmtDate, fmtMoney, fullName } from "@/lib/format";
 import { VISIT_STATUS } from "@/lib/enums";
@@ -107,6 +109,12 @@ export default async function PortalHome() {
           )}
         </SectionCard>
       </div>
+
+      <PortalRequests />
+
+      {ctx.role === "PATIENT" && (
+        <FamilyAccess basePath="/api/portal/family" title="Invite Family Members" />
+      )}
 
       <SectionCard title="Invoices">
         {invoices.length === 0 ? <p className="muted">No invoices.</p> : (

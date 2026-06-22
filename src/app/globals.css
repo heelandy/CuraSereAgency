@@ -9,6 +9,20 @@
 @layer base {
   :root {
     --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+    /* Default brand palette (Cura_Sera teal) as RGB channels. A per-agency
+       <BrandStyle/> overrides these at runtime to re-theme the whole app. */
+    --brand-50: 239 250 246;
+    --brand-100: 216 241 230;
+    --brand-200: 179 227 206;
+    --brand-300: 130 205 176;
+    --brand-400: 79 176 142;
+    --brand-500: 45 148 114;
+    --brand-600: 31 119 92;
+    --brand-700: 27 95 75;
+    --brand-800: 25 76 61;
+    --brand-900: 22 63 52;
+    --brand-950: 10 36 30;
   }
   html {
     -webkit-text-size-adjust: 100%;

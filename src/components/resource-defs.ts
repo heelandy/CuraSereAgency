@@ -54,6 +54,8 @@ export const resourceDefs: Record<string, CrudConfig> = {
       { name: "state", label: "State", type: "text" },
       { name: "zip", label: "ZIP", type: "text" },
       { name: "admittedAt", label: "Admitted date", type: "date" },
+      { name: "requiredSkills", label: "Required skills (comma-sep)", type: "text", full: true },
+      { name: "genderPreference", label: "Caregiver gender preference", type: "select", options: opts(E.GENDER) },
       { name: "notes", label: "Notes", type: "textarea" },
     ],
   },
@@ -73,11 +75,14 @@ export const resourceDefs: Record<string, CrudConfig> = {
       { name: "firstName", label: "First name", type: "text", required: true },
       { name: "lastName", label: "Last name", type: "text", required: true },
       { name: "discipline", label: "Discipline", type: "select", options: opts(E.CAREGIVER_DISCIPLINE) },
+      { name: "employmentType", label: "Employment type", type: "select", options: opts(E.EMPLOYMENT_TYPE) },
       { name: "status", label: "Status", type: "select", options: opts(E.CAREGIVER_STATUS) },
       { name: "email", label: "Email", type: "text" },
       { name: "phone", label: "Phone", type: "text" },
       { name: "hourlyRate", label: "Hourly rate", type: "money" },
       { name: "maxHoursPerWeek", label: "Max hours/week", type: "number" },
+      { name: "gender", label: "Gender", type: "select", options: opts(E.GENDER) },
+      { name: "yearsExperience", label: "Years experience", type: "number" },
       { name: "languages", label: "Languages (comma-sep)", type: "text", full: true },
       { name: "addressLine", label: "Address", type: "text", full: true },
       { name: "city", label: "City", type: "text" },
@@ -129,6 +134,7 @@ export const resourceDefs: Record<string, CrudConfig> = {
       { name: "assessment", label: "Assessment", type: "textarea" },
       { name: "plan", label: "Plan", type: "textarea" },
       { name: "narrative", label: "Narrative", type: "textarea" },
+      { name: "checklist", label: "Task checklist (e.g. Bathing ✓, Meal ✓)", type: "textarea" },
     ],
   },
 
@@ -168,6 +174,43 @@ export const resourceDefs: Record<string, CrudConfig> = {
       { name: "status", label: "Status", type: "select", options: [{ value: "ACTIVE", label: "Active" }, { value: "DRAFT", label: "Draft" }, { value: "ARCHIVED", label: "Archived" }] },
       { name: "startDate", label: "Start date", type: "date" },
       { name: "reviewDate", label: "Review date", type: "date" },
+    ],
+  },
+
+  "med-logs": {
+    title: "Medication Administration", singular: "Med Log", resource: "med-logs",
+    subtitle: "Med Tech medication tasks, logs and errors",
+    columns: [
+      { key: "patient", label: "Patient", type: "fullName", accessor: "patient" },
+      { key: "medicationName", label: "Medication" },
+      { key: "status", label: "Status", type: "badge", badgeMap: { SCHEDULED: "blue", GIVEN: "green", MISSED: "red", REFUSED: "amber", ERROR: "red" }, labelMap: E.MED_LOG_STATUS },
+      { key: "scheduledAt", label: "Scheduled", type: "datetime" },
+      { key: "administeredAt", label: "Given", type: "datetime" },
+    ],
+    fields: [
+      patientFieldReq,
+      { name: "medicationName", label: "Medication", type: "text", required: true },
+      { name: "status", label: "Status", type: "select", options: opts(E.MED_LOG_STATUS) },
+      { name: "scheduledAt", label: "Scheduled at", type: "datetime" },
+      { name: "administeredAt", label: "Administered at", type: "datetime" },
+      { name: "notes", label: "Notes", type: "textarea" },
+    ],
+  },
+
+  "care-tasks": {
+    title: "Care Tasks", singular: "Task", resource: "care-tasks",
+    subtitle: "Daily patient task lists (morning / afternoon / evening)",
+    columns: [
+      { key: "patient", label: "Patient", type: "fullName", accessor: "patient" },
+      { key: "title", label: "Task" },
+      { key: "timeOfDay", label: "When", labelMap: E.TIME_OF_DAY },
+      { key: "status", label: "Status", type: "badge", badgeMap: { PENDING: "amber", DONE: "green", SKIPPED: "neutral" }, labelMap: E.CARE_TASK_STATUS },
+    ],
+    fields: [
+      patientFieldReq,
+      { name: "title", label: "Task", type: "text", required: true },
+      { name: "timeOfDay", label: "Time of day", type: "select", options: opts(E.TIME_OF_DAY) },
+      { name: "status", label: "Status", type: "select", options: opts(E.CARE_TASK_STATUS) },
     ],
   },
 
@@ -345,6 +388,71 @@ export const resourceDefs: Record<string, CrudConfig> = {
       { name: "shiftDifferential", label: "Shift differential", type: "money" },
       { name: "grossPay", label: "Gross pay", type: "money" },
       { name: "status", label: "Status", type: "select", options: opts(E.PAYROLL_STATUS) },
+    ],
+  },
+
+  "time-entries": {
+    title: "Time Entries", singular: "Time Entry", resource: "time-entries",
+    subtitle: "Hours worked — the source of truth for payroll",
+    columns: [
+      { key: "caregiver", label: "Caregiver", type: "fullName", accessor: "caregiver" },
+      { key: "entryType", label: "Type", labelMap: E.TIME_ENTRY_TYPE },
+      { key: "clockIn", label: "Clock in", type: "datetime" },
+      { key: "clockOut", label: "Clock out", type: "datetime" },
+      { key: "regularHours", label: "Reg", type: "number" },
+      { key: "overtimeHours", label: "OT", type: "number" },
+      { key: "status", label: "Status", type: "badge", badgeMap: { DRAFT: "neutral", SUBMITTED: "blue", PENDING: "amber", APPROVED: "green", REJECTED: "red", ADJUSTED: "violet", LOCKED: "neutral", EXPORTED: "green" }, labelMap: E.TIME_ENTRY_STATUS },
+    ],
+    fields: [
+      { ...caregiverField, required: true },
+      { name: "entryType", label: "Type", type: "select", options: opts(E.TIME_ENTRY_TYPE) },
+      { name: "clockIn", label: "Clock in", type: "datetime" },
+      { name: "clockOut", label: "Clock out", type: "datetime" },
+      { name: "regularHours", label: "Regular hours", type: "number" },
+      { name: "overtimeHours", label: "Overtime hours", type: "number" },
+      { name: "status", label: "Status", type: "select", options: opts(E.TIME_ENTRY_STATUS) },
+      { name: "notes", label: "Notes", type: "textarea" },
+    ],
+  },
+
+  pto: {
+    title: "PTO Requests", singular: "PTO Request", resource: "pto",
+    subtitle: "Vacation, sick, holiday and floating time",
+    columns: [
+      { key: "caregiver", label: "Caregiver", type: "fullName", accessor: "caregiver" },
+      { key: "type", label: "Type", labelMap: E.PTO_TYPE },
+      { key: "hours", label: "Hours", type: "number" },
+      { key: "startDate", label: "Start", type: "date" },
+      { key: "status", label: "Status", type: "badge", badgeMap: { REQUESTED: "amber", APPROVED: "green", DENIED: "red", USED: "neutral", EXPIRED: "neutral" }, labelMap: E.PTO_STATUS },
+    ],
+    fields: [
+      { ...caregiverField, required: true },
+      { name: "type", label: "Type", type: "select", options: opts(E.PTO_TYPE) },
+      { name: "hours", label: "Hours", type: "number" },
+      { name: "startDate", label: "Start date", type: "date" },
+      { name: "endDate", label: "End date", type: "date" },
+      { name: "status", label: "Status", type: "select", options: opts(E.PTO_STATUS) },
+      { name: "notes", label: "Notes", type: "textarea" },
+    ],
+  },
+
+  mileage: {
+    title: "Mileage", singular: "Mileage Entry", resource: "mileage",
+    subtitle: "GPS + manual mileage for reimbursement",
+    columns: [
+      { key: "caregiver", label: "Caregiver", type: "fullName", accessor: "caregiver" },
+      { key: "date", label: "Date", type: "date" },
+      { key: "miles", label: "Miles", type: "number" },
+      { key: "type", label: "Type", labelMap: E.MILEAGE_TYPE },
+      { key: "status", label: "Status", type: "badge", badgeMap: { SUBMITTED: "blue", APPROVED: "green", REJECTED: "red", PAID: "green" }, labelMap: E.MILEAGE_STATUS },
+    ],
+    fields: [
+      { ...caregiverField, required: true },
+      { name: "date", label: "Date", type: "date" },
+      { name: "miles", label: "Miles", type: "number" },
+      { name: "type", label: "Type", type: "select", options: opts(E.MILEAGE_TYPE) },
+      { name: "status", label: "Status", type: "select", options: opts(E.MILEAGE_STATUS) },
+      { name: "notes", label: "Notes", type: "textarea" },
     ],
   },
 
@@ -591,6 +699,63 @@ export const resourceDefs: Record<string, CrudConfig> = {
       { name: "zip", label: "ZIP", type: "text" },
       { name: "phone", label: "Phone", type: "text" },
       { name: "active", label: "Active", type: "checkbox", defaultValue: true },
+    ],
+  },
+
+  services: {
+    title: "Service Catalog", singular: "Service", resource: "services",
+    subtitle: "Services your agency offers (drives matching + billing)",
+    columns: [
+      { key: "name", label: "Service" },
+      { key: "price", label: "Price", type: "money" },
+      { key: "durationMins", label: "Duration (min)", type: "number" },
+      { key: "requiredSkill", label: "Required skill" },
+      { key: "active", label: "Active", type: "bool" },
+    ],
+    fields: [
+      { name: "name", label: "Name", type: "text", required: true },
+      { name: "price", label: "Price ($/hr)", type: "money" },
+      { name: "durationMins", label: "Duration (minutes)", type: "number" },
+      { name: "requiredSkill", label: "Required skill", type: "text" },
+      { name: "description", label: "Description", type: "textarea" },
+      { name: "active", label: "Active", type: "checkbox", defaultValue: true },
+    ],
+  },
+
+  forms: {
+    title: "Forms Builder", singular: "Form", resource: "forms",
+    subtitle: "No-code agency forms (intake, incident, assessment…)",
+    columns: [
+      { key: "name", label: "Form" },
+      { key: "category", label: "Category", labelMap: E.FORM_CATEGORY },
+      { key: "active", label: "Active", type: "bool" },
+    ],
+    fields: [
+      { name: "name", label: "Form name", type: "text", required: true },
+      { name: "category", label: "Category", type: "select", options: opts(E.FORM_CATEGORY) },
+      { name: "fields", label: "Fields — one per line as Label|type (text/dropdown/checkbox/date/signature/file)", type: "textarea" },
+      { name: "active", label: "Active", type: "checkbox", defaultValue: true },
+    ],
+  },
+
+  "pto-balances": {
+    title: "PTO Balances", singular: "PTO Balance", resource: "pto-balances",
+    subtitle: "Accrued time-off balances per caregiver",
+    columns: [
+      { key: "caregiver", label: "Caregiver", type: "fullName", accessor: "caregiver" },
+      { key: "vacationHours", label: "Vacation", type: "number" },
+      { key: "sickHours", label: "Sick", type: "number" },
+      { key: "holidayHours", label: "Holiday", type: "number" },
+      { key: "floatingHours", label: "Floating", type: "number" },
+      { key: "usedHours", label: "Used", type: "number" },
+    ],
+    fields: [
+      { ...caregiverField, required: true },
+      { name: "vacationHours", label: "Vacation hours", type: "number" },
+      { name: "sickHours", label: "Sick hours", type: "number" },
+      { name: "holidayHours", label: "Holiday hours", type: "number" },
+      { name: "floatingHours", label: "Floating hours", type: "number" },
+      { name: "usedHours", label: "Used hours", type: "number" },
     ],
   },
 

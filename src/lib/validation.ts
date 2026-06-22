@@ -7,6 +7,9 @@ import {
   CLAIM_STATUS, PAYMENT_METHOD, PAYROLL_STATUS, ONBOARDING_STAGE,
   REFERRAL_SOURCE_TYPE, REFERRAL_STAGE, AUTH_STATUS, WAIVER_PROGRAM,
   EMERGENCY_TYPE, AI_MODULE, ROLE_LABELS, EVV_METHOD, EVV_VERIFICATION,
+  GENDER, MED_LOG_STATUS, TIME_OF_DAY, CARE_TASK_STATUS, REQUEST_TYPE,
+  TIME_ENTRY_TYPE, TIME_ENTRY_STATUS, PTO_TYPE, PTO_STATUS, MILEAGE_TYPE, MILEAGE_STATUS,
+  EMPLOYMENT_TYPE, FORM_CATEGORY,
 } from "./enums";
 
 // ── Helpers (APP_BLUEPRINT §8) ───────────────────────────────────────────────
@@ -81,6 +84,8 @@ export const patientSchema = z.object({
   branchId: optionalId,
   admittedAt: optionalDate,
   dischargedAt: optionalDate,
+  requiredSkills: optionalShort,
+  genderPreference: z.preprocess(emptyToNull, enumOf(GENDER).nullable().optional()),
   notes: longText,
 });
 
@@ -152,11 +157,14 @@ export const caregiverSchema = z.object({
   state: optionalShort,
   zip: optionalShort,
   discipline: enumOf(CAREGIVER_DISCIPLINE).default("HHA"),
+  employmentType: enumOf(EMPLOYMENT_TYPE).default("W2"),
   status: enumOf(CAREGIVER_STATUS).default("ACTIVE"),
   branchId: optionalId,
   hireDate: optionalDate,
   hourlyRate: optionalMoney,
   languages: optionalShort,
+  gender: z.preprocess(emptyToNull, enumOf(GENDER).nullable().optional()),
+  yearsExperience: optionalNum,
   maxHoursPerWeek: optionalNum,
   latitude: optionalNum,
   longitude: optionalNum,
@@ -228,6 +236,7 @@ export const visitNoteSchema = z.object({
   assessment: longText,
   plan: longText,
   narrative: longText,
+  checklist: longText, // structured task checklist (JSON or free text)
   status: z.enum(["DRAFT", "SIGNED"]).default("DRAFT"),
 });
 
@@ -306,6 +315,7 @@ export const announcementSchema = z.object({
 export const conversationSchema = z.object({
   subject: optionalShort,
   kind: z.enum(["DIRECT", "GROUP"]).default("DIRECT"),
+  participantIds: z.array(id).min(1, "Pick at least one recipient").max(20),
 });
 
 export const messageSchema = z.object({
@@ -484,4 +494,107 @@ export const aiInsightSchema = z.object({
   severity: z.enum(["INFO", "WARNING", "CRITICAL"]).default("INFO"),
   entityType: optionalShort,
   entityId: optionalId,
+});
+
+// ── Medication administration (Med Tech) ─────────────────────────────────────
+export const medicationLogSchema = z.object({
+  patientId: id,
+  medicationName: shortText,
+  medicationId: optionalId,
+  caregiverId: optionalId,
+  visitId: optionalId,
+  scheduledAt: optionalDate,
+  administeredAt: optionalDate,
+  status: enumOf(MED_LOG_STATUS).default("SCHEDULED"),
+  notes: longText,
+});
+
+// ── Care tasks ───────────────────────────────────────────────────────────────
+export const careTaskSchema = z.object({
+  patientId: id,
+  visitId: optionalId,
+  title: shortText,
+  timeOfDay: enumOf(TIME_OF_DAY).default("MORNING"),
+  status: enumOf(CARE_TASK_STATUS).default("PENDING"),
+  completedAt: optionalDate,
+});
+
+// ── Portal schedule requests (Phase 7) ───────────────────────────────────────
+export const portalRequestSchema = z.object({
+  type: enumOf(REQUEST_TYPE).default("RESCHEDULE"),
+  message: requiredLong,
+  visitId: optionalId,
+  preferredDate: optionalDate,
+  preferredCaregiver: optionalShort,
+  preferredCaregiverId: optionalId,
+});
+
+export const scheduleRequestReviewSchema = z.object({
+  status: z.enum(["PENDING", "APPROVED", "DECLINED"]),
+  reviewNote: longText,
+});
+
+// ── Self-serve signup (creates a new agency + its Agency Owner) ───────────────
+export const signupSchema = z.object({
+  agencyName: shortText,
+  name: shortText,
+  email: z.string().trim().toLowerCase().email("Enter a valid email"),
+  password: z.string().min(8, "Use at least 8 characters").max(200),
+});
+
+// ── Workforce: time / PTO / mileage ──────────────────────────────────────────
+export const timeEntrySchema = z.object({
+  caregiverId: id,
+  entryType: enumOf(TIME_ENTRY_TYPE).default("VISIT"),
+  clockIn: optionalDate,
+  clockOut: optionalDate,
+  regularHours: money,
+  overtimeHours: money,
+  status: enumOf(TIME_ENTRY_STATUS).default("SUBMITTED"),
+  notes: longText,
+});
+
+export const ptoRequestSchema = z.object({
+  caregiverId: id,
+  type: enumOf(PTO_TYPE).default("VACATION"),
+  hours: money,
+  startDate: optionalDate,
+  endDate: optionalDate,
+  status: enumOf(PTO_STATUS).default("REQUESTED"),
+  notes: longText,
+});
+
+export const mileageEntrySchema = z.object({
+  caregiverId: id,
+  date: optionalDate,
+  miles: money,
+  type: enumOf(MILEAGE_TYPE).default("PATIENT_TO_PATIENT"),
+  status: enumOf(MILEAGE_STATUS).default("SUBMITTED"),
+  notes: longText,
+});
+
+// ── Agency configuration center ──────────────────────────────────────────────
+export const serviceSchema = z.object({
+  name: shortText,
+  description: longText,
+  price: money,
+  durationMins: optionalNum,
+  requiredSkill: optionalShort,
+  active: optionalBool,
+});
+
+export const formTemplateSchema = z.object({
+  name: shortText,
+  category: enumOf(FORM_CATEGORY).default("INTAKE"),
+  fields: z.preprocess(emptyToNull, z.string().max(20000).nullable().optional()),
+  active: optionalBool,
+});
+
+export const ptoBalanceSchema = z.object({
+  caregiverId: id,
+  vacationHours: money,
+  sickHours: money,
+  holidayHours: money,
+  floatingHours: money,
+  usedHours: money,
 });
