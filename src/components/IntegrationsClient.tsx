@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-type Integration = { provider: string; label: string; connected: boolean; hasSecret: boolean };
+type Integration = { provider: string; label: string; connected: boolean; hasSecret: boolean; disabledByPlatform?: boolean };
 
 export function IntegrationsClient() {
   const [rows, setRows] = useState<Integration[]>([]);
@@ -39,21 +39,26 @@ export function IntegrationsClient() {
             </div>
             <button
               className={i.connected ? "btn-secondary btn-sm" : "btn-primary btn-sm"}
-              disabled={busy === i.provider}
+              disabled={busy === i.provider || (i.disabledByPlatform && !i.connected)}
               onClick={() => patch(i.provider, { connected: !i.connected })}
             >
               {i.connected ? "Disconnect" : "Connect"}
             </button>
           </div>
 
+          {i.disabledByPlatform && (
+            <p className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">Disabled by the platform administrator.</p>
+          )}
+
           <div>
             <label className="label">API key / secret {i.hasSecret && <span className="badge-green ml-1">Saved (encrypted)</span>}</label>
             <div className="flex gap-2">
               <input
                 type="password" className="input" placeholder={i.hasSecret ? "••••••• (stored)" : "Paste key…"}
+                disabled={i.disabledByPlatform}
                 value={secrets[i.provider] ?? ""} onChange={(e) => setSecrets((s) => ({ ...s, [i.provider]: e.target.value }))}
               />
-              <button className="btn-secondary btn-sm" disabled={busy === i.provider || !(secrets[i.provider] ?? "").trim()} onClick={() => saveSecret(i.provider)}>Save</button>
+              <button className="btn-secondary btn-sm" disabled={busy === i.provider || i.disabledByPlatform || !(secrets[i.provider] ?? "").trim()} onClick={() => saveSecret(i.provider)}>Save</button>
             </div>
             {i.hasSecret && (
               <button className="mt-1 text-xs text-red-600 hover:underline" onClick={() => patch(i.provider, { secret: "" })}>Clear key</button>

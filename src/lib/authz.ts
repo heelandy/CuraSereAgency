@@ -198,7 +198,7 @@ export const GRANTABLE_CAPABILITIES: { cap: Capability; label: string }[] = [
   { cap: "caregivers:write", label: "Manage caregiver records" },
   { cap: "clinical:write", label: "Clinical documentation" },
   { cap: "meds:write", label: "Medication administration" },
-  { cap: "billing:write", label: "Billing & invoices" },
+  { cap: "billing:write", label: "Billing, invoices & online payments" },
   { cap: "payroll:write", label: "Payroll" },
   { cap: "compliance:write", label: "Compliance" },
   { cap: "hr:write", label: "HR" },

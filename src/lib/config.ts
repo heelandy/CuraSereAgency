@@ -17,6 +17,9 @@ export const config = {
   stripe: {
     secretKey: env("STRIPE_SECRET_KEY"),
     webhookSecret: env("STRIPE_WEBHOOK_SECRET"),
+    // Separate signing secret for the Stripe Connect (connected-account) webhook
+    // endpoint — agency-collected patient payments arrive here.
+    connectWebhookSecret: env("STRIPE_CONNECT_WEBHOOK_SECRET"),
     prices: {
       STARTER: env("STRIPE_PRICE_STARTER"),
       PROFESSIONAL: env("STRIPE_PRICE_PROFESSIONAL"),

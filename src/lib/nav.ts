@@ -63,6 +63,7 @@ export const NAV: NavGroup[] = [
     items: [
       { label: "Invoices", href: "/dashboard/invoices", icon: "dollar", caps: ["billing:read"] },
       { label: "Payments", href: "/dashboard/payments", icon: "dollar", caps: ["billing:read"] },
+      { label: "Online Payments", href: "/dashboard/admin/payments", icon: "dollar", caps: ["billing:read"] },
       { label: "Claims", href: "/dashboard/claims", icon: "dollar", caps: ["billing:read"] },
       { label: "Payroll", href: "/dashboard/payroll", icon: "dollar", caps: ["payroll:read"] },
       { label: "Time Entries", href: "/dashboard/time-entries", icon: "clock", caps: ["payroll:read"] },

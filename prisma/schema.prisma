@@ -32,6 +32,16 @@ model AgencyNetwork {
   agencies  Agency[]
 }
 
+// Global, platform-owner (super-admin) settings — NOT tenant-scoped. Simple
+// key/value store for system-wide switches (e.g. the Stripe billing kill switch
+// "stripeBillingEnabled"). Booleans are stored as the strings "true"/"false".
+model PlatformSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
 model Agency {
   id        String         @id @default(cuid())
   name      String
@@ -48,12 +58,18 @@ model Agency {
   network   AgencyNetwork? @relation(fields: [networkId], references: [id], onDelete: SetNull)
   networkId String?
 
-  // Subscription / billing (Phase 21)
+  // Subscription / billing (Phase 21) — the PLATFORM charging this agency.
   plan                 String   @default("STARTER") // STARTER|PROFESSIONAL|GROWTH|ENTERPRISE
   subscriptionStatus   String   @default("trialing") // trialing|active|past_due|canceled
   stripeCustomerId     String?
   stripeSubscriptionId String?
   trialEndsAt          DateTime?
+
+  // Stripe Connect — the agency's OWN Stripe account, used to collect payments
+  // from THEIR patients/clients (we take no cut; direct charges on this account).
+  stripeConnectId               String? // acct_xxx (connected account)
+  stripeConnectChargesEnabled   Boolean @default(false)
+  stripeConnectDetailsSubmitted Boolean @default(false)
 
   // White-label branding + configuration (Agency Configuration Center).
   // Resolved at runtime by host; all customization is DATA, never code.
@@ -123,6 +139,7 @@ model Agency {
   ptoBalances          PtoBalance[]
   formTemplates        FormTemplate[]
   integrations         IntegrationSetting[]
+  recurringPlans       RecurringPlan[]
 
   @@index([networkId])
 }
@@ -321,6 +338,7 @@ model Patient {
   scheduleRequests  ScheduleRequest[]
   medicationLogs    MedicationLog[]
   careTasks         CareTask[]
+  recurringPlans    RecurringPlan[]
 
   @@index([agencyId])
   @@index([branchId])
@@ -857,6 +875,10 @@ model Invoice {
   issuedAt    DateTime?
   dueAt       DateTime?
   notes       String?
+  // Stripe (agency's connected account) — reusable hosted payment link for this
+  // invoice; the connected-account webhook reconciles payment back to it.
+  stripePaymentLinkId  String?
+  stripePaymentLinkUrl String?
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
   lines       InvoiceLine[]
@@ -886,15 +908,41 @@ model Payment {
   invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
   invoiceId String?
   amount    Float
-  method    String   @default("CASH") // CASH|CARD|CHECK|ACH|INSURANCE
+  method    String   @default("CASH") // CASH|CARD|CHECK|ACH|INSURANCE|STRIPE
   // COMPLETED|PENDING|REFUNDED
   status    String   @default("COMPLETED")
   reference String?
+  // Stripe PaymentIntent id (connected account) — unique so webhook retries are
+  // idempotent and we never double-record an online payment.
+  stripePaymentIntentId String? @unique
   paidAt    DateTime @default(now())
   createdAt DateTime @default(now())
 
   @@index([agencyId])
   @@index([invoiceId])
+}
+
+// Recurring private-pay billing — the agency auto-charges a patient's saved card
+// on a schedule via a Stripe subscription on the agency's connected account.
+model RecurringPlan {
+  id          String   @id @default(cuid())
+  agency      Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId    String
+  patient     Patient  @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId   String
+  description String
+  amount      Float    @default(0) // $ per interval
+  interval    String   @default("month") // week|month
+  // PENDING (awaiting first checkout) | ACTIVE | PAST_DUE | CANCELED
+  status      String   @default("PENDING")
+  stripeSubscriptionId String?
+  stripeCheckoutUrl    String? // hosted checkout to capture the card / start the sub
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([agencyId])
+  @@index([patientId])
+  @@index([status])
 }
 
 model Claim {

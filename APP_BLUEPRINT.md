@@ -29,7 +29,7 @@ with your own entities; the structure stays the same.
 | DB / ORM | PostgreSQL + Prisma |
 | Auth | NextAuth (credentials provider) + JWT session, role re-read from DB each request |
 | Validation | Zod (one schema per resource; reused by API + forms) |
-| Payments | Stripe (Checkout + Customer Portal + webhooks **and** a pull-reconcile fallback) |
+| Payments | Stripe — Checkout + Customer Portal + webhooks for platform subscriptions; **Connect** (Standard, direct charges) so each tenant collects from its own customers |
 | Styling | Tailwind CSS with a custom `brand` palette + component classes in `globals.css` |
 | Tests | Vitest (unit tests for lib/ logic) |
 | PDF | Zero-dependency hand-rolled text-PDF generator |
@@ -140,12 +140,22 @@ field/column defs + a nav entry. No bespoke controller.
 
 ## 9. Billing (Stripe), if monetized
 
+Two independent money flows — keep them separate (different accounts, webhooks, gates):
+
+**(a) Platform → tenant (subscriptions):**
 - Checkout Sessions (preferred) + Customer Portal; entitlements derive **only** from
   signed, idempotent webhooks **plus** a pull-reconcile fallback (resolves missed/delayed
   webhooks by customer id or owner email). Card data never touches your server.
 - Plan catalogue + feature gating live **in code** (source of truth, tamper-proof);
   only Stripe Price IDs are configured via UI/env. Effective tier re-resolved per request.
 - Admin tools: in-app refunds/credits, manual comp/grant, CSV export — all audited.
+
+**(b) Tenant → its own customers (marketplace):** Stripe **Connect** — see §16.18.
+
+**Runtime kill switch:** layer a DB-backed global flag over the env config so an operator
+can disable billing platform-wide without a redeploy — `effectiveEnabled = envConfigured
+&& !disabledByOperator` (default on). Store it in a non-tenant `PlatformSetting` key/value
+table, gated by `platform:manage`; have checkout, the billing UI, and Connect all read it.
 
 ---
 
@@ -446,3 +456,34 @@ client-supplied role), stamp an email-verify token, send mail (dev returns the
 link). Keep credential login deterministic by rejecting an email that already
 exists in any tenant. Staff are then invited from inside the tenant — signup is
 owner-only; joining an existing tenant is a separate invite flow.
+
+### 16.18 Two-sided payments: platform subscriptions + tenant Stripe Connect
+A marketplace SaaS often needs **two** money flows; don't conflate them. The
+platform charges tenants (§9a), and each tenant charges *its own* customers via
+Stripe **Connect** (Standard accounts, **direct charges**) — the platform takes an
+optional `application_fee` or **none**, and funds settle straight to the tenant.
+- **Tenant = connected account.** The platform creates one connected account per
+  tenant and stores `connectId` + readiness flags (`chargesEnabled`,
+  `detailsSubmitted`) on the tenant row. Onboard via a hosted **Account Link**
+  (`account_onboarding`); account create/retrieve/link are *platform* calls, but
+  every charge runs `{ stripeAccount: connectId }` so it executes on the tenant's
+  account. Card data, payouts and KYC stay with Stripe.
+- **One helper layer** (`stripe-connect.ts`): `startOnboarding`,
+  `refreshConnectStatus` (pull live `charges_enabled` and persist), and charge
+  builders — reusable hosted **Payment Links** (create a Price then a Link; for
+  invoices + ad-hoc/one-off amounts) and subscription **Checkout** (recurring).
+  Put your reconciliation key in **both** `metadata` and
+  `payment_intent_data.metadata` so the webhook can map a payment back to a local row.
+- **Separate webhook + signing secret** for connected-account events (events carry
+  `event.account`); verify with the Connect secret, not the platform one. Handle
+  `account.updated` (sync readiness flags), `checkout.session.completed` (mark the
+  invoice/plan paid + record a payment), and subscription
+  `invoice.paid|payment_failed|customer.subscription.deleted`. Make it **idempotent**:
+  a `@unique` `stripePaymentIntentId` on the payment row means retries never double-count.
+- **Gates compose:** a charge action requires (platform kill switch ON, §9) **AND**
+  (tenant `chargesEnabled`). Expose the same readiness to the customer portal so a
+  "Pay now" button only appears when collection is actually possible. Onboarding is
+  **capability**-gated (`billing:*`, grantable per §16.17) — owner decides who may
+  connect, no role hardcoding.
+- **Centralize on one path:** when you add Connect, *remove* any prior key-paste
+  payment integration so tenants never see two conflicting Stripe setups.

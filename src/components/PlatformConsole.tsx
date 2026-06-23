@@ -14,6 +14,7 @@ export function PlatformConsole({ homeAgencyId }: { homeAgencyId: string }) {
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ agencyName: "", name: "", email: "", password: "" });
   const [error, setError] = useState<string | null>(null);
+  const [stripe, setStripe] = useState<{ stripeConfigured: boolean; stripeBillingEnabled: boolean } | null>(null);
 
   async function load() {
     setLoading(true);
@@ -21,7 +22,23 @@ export function PlatformConsole({ homeAgencyId }: { homeAgencyId: string }) {
     setRows(res.ok ? await res.json() : []);
     setLoading(false);
   }
-  useEffect(() => { load(); }, []);
+  async function loadStripe() {
+    const res = await fetch("/api/platform/settings");
+    setStripe(res.ok ? await res.json() : null);
+  }
+  useEffect(() => { load(); loadStripe(); }, []);
+
+  async function toggleStripe() {
+    if (!stripe) return;
+    const next = !stripe.stripeBillingEnabled;
+    if (!confirm(`${next ? "Enable" : "Disable"} Stripe billing for the whole platform?`)) return;
+    setBusy("stripe");
+    const res = await fetch("/api/platform/settings", {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stripeBillingEnabled: next }),
+    });
+    setBusy(null);
+    if (res.ok) setStripe(await res.json());
+  }
 
   async function viewAs(agencyId: string) {
     setBusy(agencyId);
@@ -73,6 +90,38 @@ export function PlatformConsole({ homeAgencyId }: { homeAgencyId: string }) {
         <div className="card card-pad"><p className="muted">Users</p><p className="mt-1 text-2xl font-semibold">{totals.users}</p></div>
         <div className="card card-pad"><p className="muted">Patients</p><p className="mt-1 text-2xl font-semibold">{totals.patients}</p></div>
         <div className="card card-pad"><p className="muted">Visits</p><p className="mt-1 text-2xl font-semibold">{totals.visits}</p></div>
+      </div>
+
+      <div className="card card-pad">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="font-semibold">Stripe billing</h3>
+            <p className="muted mt-0.5 text-sm">
+              {stripe == null ? "Loading…" : stripe.stripeBillingEnabled ? (
+                <>Enabled platform-wide — agencies can be charged and can connect their own Stripe.</>
+              ) : (
+                <>Disabled — subscription checkout is off and agencies cannot connect Stripe.</>
+              )}
+              {stripe && !stripe.stripeConfigured && (
+                <span className="ml-1 text-amber-700">Stripe keys are not set in this environment, so it stays inactive until configured.</span>
+              )}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {stripe && (
+              <span className={stripe.stripeBillingEnabled ? "badge-green" : "badge-red"}>
+                {stripe.stripeBillingEnabled ? "Enabled" : "Disabled"}
+              </span>
+            )}
+            <button
+              className={stripe?.stripeBillingEnabled ? "btn-ghost btn-sm text-red-600" : "btn-primary btn-sm"}
+              disabled={!stripe || busy === "stripe"}
+              onClick={toggleStripe}
+            >
+              {stripe?.stripeBillingEnabled ? "Disable Stripe" : "Enable Stripe"}
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="card">

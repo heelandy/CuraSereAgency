@@ -6,6 +6,7 @@ import { UpgradeButton } from "@/components/UpgradeButton";
 import { CheckIcon } from "@/components/icons";
 import { fmtDate } from "@/lib/format";
 import { stripeEnabled } from "@/lib/config";
+import { stripeBillingEnabled } from "@/lib/platform";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,7 @@ export default async function BillingPage() {
   const agency = await prisma.agency.findUnique({ where: { id: ctx.agencyId } });
   const current = agency?.plan ?? "STARTER";
   const def = planDef(current);
+  const billingOn = await stripeBillingEnabled();
 
   const [patients, caregivers, branches] = await Promise.all([
     prisma.patient.count({ where: { agencyId: ctx.agencyId } }),
@@ -32,10 +34,16 @@ export default async function BillingPage() {
         <StatCard label="Renews / Trial ends" value={fmtDate(agency?.trialEndsAt)} tone="amber" />
       </div>
 
-      {!stripeEnabled && (
+      {!billingOn && (
         <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Stripe is not configured in this environment. Plan selection is shown read-only — add
-          <code className="mx-1 rounded bg-white px-1">STRIPE_SECRET_KEY</code> and price IDs to enable live checkout.
+          {stripeEnabled ? (
+            <>Online checkout is currently disabled by the platform administrator. Plan selection is shown read-only.</>
+          ) : (
+            <>
+              Stripe is not configured in this environment. Plan selection is shown read-only — add
+              <code className="mx-1 rounded bg-white px-1">STRIPE_SECRET_KEY</code> and price IDs to enable live checkout.
+            </>
+          )}
         </div>
       )}
 

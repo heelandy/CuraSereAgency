@@ -4,6 +4,7 @@ import { handle, json, Errors } from "@/lib/http";
 import { mutationGuard, RateLimits } from "@/lib/rate-limit";
 import { stripe } from "@/lib/stripe";
 import { config } from "@/lib/config";
+import { stripeBillingEnabled } from "@/lib/platform";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +17,9 @@ export function POST(req: Request) {
     mutationGuard(req, "billing", ctx.userId, RateLimits.write);
     const { plan } = schema.parse(await req.json().catch(() => ({})));
 
-    if (!stripe) throw Errors.badRequest("Billing is not configured. Set STRIPE_SECRET_KEY and plan price IDs to enable checkout.");
+    if (!(await stripeBillingEnabled()) || !stripe) {
+      throw Errors.badRequest("Online billing is currently disabled. Contact the platform administrator, or set STRIPE_SECRET_KEY and plan price IDs to enable checkout.");
+    }
     const price = config.stripe.prices[plan];
     if (!price) throw Errors.badRequest(`No Stripe price configured for ${plan}.`);
 

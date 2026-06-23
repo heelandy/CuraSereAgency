@@ -14,7 +14,12 @@
       "PowerShell(\"stopped\")",
       "PowerShell($env:PORT=\"3939\"; npx next start -p 3939)",
       "PowerShell(node tmp_signup.js)",
-      "PowerShell(try { $c = Get-NetTCPConnection -LocalPort 3939 -State Listen -ErrorAction Stop; $c.OwningProcess | Select-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force; \"stopped PID $_\" } } catch { \"no listener on 3939 \\(already stopped\\)\" })"
+      "PowerShell(try { $c = Get-NetTCPConnection -LocalPort 3939 -State Listen -ErrorAction Stop; $c.OwningProcess | Select-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force; \"stopped PID $_\" } } catch { \"no listener on 3939 \\(already stopped\\)\" })",
+      "PowerShell(Get-Process node -ErrorAction SilentlyContinue | Select-Object Id, StartTime, @{N='CPU\\(s\\)';E={[math]::Round\\($_.CPU,1\\)}} | Format-Table -AutoSize; \"---\"; Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Select-Object ProcessId, CommandLine | Format-List)",
+      "PowerShell(npx prisma generate --skip-generate 2>$null)",
+      "PowerShell(Get-Process node -ErrorAction SilentlyContinue)",
+      "PowerShell(Stop-Process -Force)",
+      "PowerShell($env:BROWSER='none'; npm run dev)"
     ]
   }
 }

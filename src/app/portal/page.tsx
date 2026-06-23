@@ -3,9 +3,11 @@ import { prisma } from "@/lib/prisma";
 import { SectionCard, Badge, EmptyState } from "@/components/ui";
 import { PortalRequests } from "@/components/PortalRequests";
 import { FamilyAccess } from "@/components/FamilyAccess";
+import { PortalPayButton } from "@/components/PortalPayButton";
 import { CalendarIcon, HeartIcon } from "@/components/icons";
 import { fmtDateTime, fmtDate, fmtMoney, fullName } from "@/lib/format";
 import { VISIT_STATUS } from "@/lib/enums";
+import { stripeBillingEnabled } from "@/lib/platform";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +32,7 @@ export default async function PortalHome() {
   }
 
   const now = new Date();
-  const [patient, visits, notes, invoices] = await Promise.all([
+  const [patient, visits, notes, invoices, agency, platformPay] = await Promise.all([
     prisma.patient.findFirst({
       where: { id: patientId, agencyId: ctx.agencyId },
       include: { carePlans: { include: { goals: true }, where: { status: "ACTIVE" } } },
@@ -42,9 +44,15 @@ export default async function PortalHome() {
     }),
     prisma.visitNote.findMany({ where: { patientId, status: "SIGNED" }, orderBy: { createdAt: "desc" }, take: 4 }),
     prisma.invoice.findMany({ where: { patientId }, orderBy: { createdAt: "desc" }, take: 5 }),
+    prisma.agency.findUnique({ where: { id: ctx.agencyId }, select: { stripeConnectChargesEnabled: true } }),
+    stripeBillingEnabled(),
   ]);
 
   if (!patient) return <EmptyState title="Record not found" />;
+
+  // Online payment is offered only when the platform allows it AND the agency has
+  // finished connecting its Stripe account.
+  const payEnabled = platformPay && Boolean(agency?.stripeConnectChargesEnabled);
 
   const visitTone: Record<string, string> = { SCHEDULED: "blue", OPEN: "amber", IN_PROGRESS: "violet", COMPLETED: "green", MISSED: "red", CANCELED: "neutral" };
   const goals = patient.carePlans.flatMap((cp) => cp.goals);
@@ -119,16 +127,21 @@ export default async function PortalHome() {
       <SectionCard title="Invoices">
         {invoices.length === 0 ? <p className="muted">No invoices.</p> : (
           <table className="table">
-            <thead><tr><th>Number</th><th>Amount</th><th>Status</th><th>Due</th></tr></thead>
+            <thead><tr><th>Number</th><th>Amount</th><th>Status</th><th>Due</th>{payEnabled && <th className="text-right">Pay</th>}</tr></thead>
             <tbody>
-              {invoices.map((i) => (
-                <tr key={i.id}>
-                  <td>{i.number ?? "—"}</td>
-                  <td>{fmtMoney(i.amount)}</td>
-                  <td><Badge tone={i.status === "PAID" ? "green" : i.status === "OVERDUE" ? "red" : "blue"}>{i.status}</Badge></td>
-                  <td>{fmtDate(i.dueAt)}</td>
-                </tr>
-              ))}
+              {invoices.map((i) => {
+                const owed = i.amount - i.amountPaid;
+                const payable = i.status !== "PAID" && i.status !== "VOID" && owed > 0;
+                return (
+                  <tr key={i.id}>
+                    <td>{i.number ?? "—"}</td>
+                    <td>{fmtMoney(i.amount)}</td>
+                    <td><Badge tone={i.status === "PAID" ? "green" : i.status === "OVERDUE" ? "red" : "blue"}>{i.status}</Badge></td>
+                    <td>{fmtDate(i.dueAt)}</td>
+                    {payEnabled && <td className="text-right">{payable ? <PortalPayButton invoiceId={i.id} /> : "—"}</td>}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

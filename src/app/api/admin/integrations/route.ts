@@ -1,13 +1,16 @@
 import { z } from "zod";
 import { requireCap } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
-import { handle, json } from "@/lib/http";
+import { handle, json, Errors } from "@/lib/http";
 import { mutationGuard, RateLimits } from "@/lib/rate-limit";
 import { logAdmin } from "@/lib/audit";
 import { encryptField } from "@/lib/crypto";
 import { INTEGRATION_PROVIDER } from "@/lib/enums";
 
 export const dynamic = "force-dynamic";
+
+// Stripe is NOT a generic key-based integration — agencies connect it via Stripe
+// Connect on the Online Payments page. It's excluded here to avoid two setups.
 
 // `secret` is the per-agency API key/token. "" clears it; omitted leaves it.
 const schema = z.object({
@@ -23,10 +26,12 @@ export function GET() {
     const ctx = await requireCap("admin:manage");
     const rows = await prisma.integrationSetting.findMany({ where: { agencyId: ctx.agencyId } });
     const byProvider = new Map(rows.map((r) => [r.provider, r]));
-    const integrations = Object.entries(INTEGRATION_PROVIDER).map(([provider, label]) => {
-      const row = byProvider.get(provider);
-      return { provider, label, connected: row?.connected ?? false, hasSecret: Boolean(row?.secret) };
-    });
+    const integrations = Object.entries(INTEGRATION_PROVIDER)
+      .filter(([provider]) => provider !== "STRIPE") // managed in Online Payments (Connect)
+      .map(([provider, label]) => {
+        const row = byProvider.get(provider);
+        return { provider, label, connected: row?.connected ?? false, hasSecret: Boolean(row?.secret) };
+      });
     return json(integrations);
   });
 }
@@ -37,6 +42,8 @@ export function PATCH(req: Request) {
     mutationGuard(req, "integration", ctx.userId, RateLimits.write);
     const { provider, connected, secret } = schema.parse(await req.json().catch(() => ({})));
     if (!(provider in INTEGRATION_PROVIDER)) throw new Error("Unknown provider");
+    // Stripe is managed via Stripe Connect on the Online Payments page.
+    if (provider === "STRIPE") throw Errors.badRequest("Connect Stripe from Revenue → Online Payments.");
 
     // Encrypt a provided secret; "" clears it; undefined leaves it unchanged.
     const secretUpdate = secret === undefined ? {} : { secret: secret === "" ? null : encryptField(secret) };
