@@ -4,6 +4,64 @@ import { useState } from "react";
 import { FEATURE_FLAGS, PAY_PERIOD, labelsToOptions } from "@/lib/enums";
 import { DomainsManager } from "@/components/DomainsManager";
 
+// Read an image file, downscale it (preserve aspect, longest side ≤ max px) and
+// return a compact PNG data URL — so an uploaded logo/favicon is small enough to
+// store inline, no file server needed.
+async function fileToDataUrl(file: File, max: number): Promise<string> {
+  const raw = await new Promise<string>((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result as string);
+    r.onerror = () => rej(new Error("read failed"));
+    r.readAsDataURL(file);
+  });
+  try {
+    const img = document.createElement("img");
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = raw; });
+    const scale = Math.min(1, max / Math.max(img.width || max, img.height || max));
+    const w = Math.max(1, Math.round((img.width || max) * scale));
+    const h = Math.max(1, Math.round((img.height || max) * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const cx = canvas.getContext("2d");
+    if (!cx) return raw;
+    cx.drawImage(img, 0, 0, w, h);
+    return canvas.toDataURL("image/png");
+  } catch {
+    return raw; // e.g. an SVG that can't be rasterized — keep the original
+  }
+}
+
+// Branding image field: paste a URL or upload a file (shown as a live preview).
+function ImageField({
+  label, hint, value, onUrl, onFile, onClear,
+}: {
+  label: string; hint: string; value: string;
+  onUrl: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onFile: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onClear: () => void;
+}) {
+  const isData = value.startsWith("data:");
+  return (
+    <div>
+      <label className="label">{label}</label>
+      <div className="flex items-center gap-2">
+        {value && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={value} alt="" className="h-9 w-9 shrink-0 rounded border border-surface-200 bg-white object-contain" />
+        )}
+        {isData
+          ? <span className="badge-green flex-1">Uploaded image</span>
+          : <input className="input" value={value} onChange={onUrl} placeholder="https://…" />}
+        <label className="btn-secondary btn-sm shrink-0 cursor-pointer">
+          Upload<input type="file" accept="image/*" className="hidden" onChange={onFile} />
+        </label>
+        {value && <button type="button" className="shrink-0 text-xs text-red-600 hover:underline" onClick={onClear}>Remove</button>}
+      </div>
+      <p className="mt-1 text-xs text-surface-400">{hint}</p>
+    </div>
+  );
+}
+
 type Branding = {
   portalName: string; slug: string;
   logoUrl: string; faviconUrl: string; loginBannerUrl: string;
@@ -40,6 +98,15 @@ export function ConfigCenter({
   const set = (k: keyof Branding) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setB((s) => ({ ...s, [k]: e.target.value }));
 
+  async function pickImage(field: "logoUrl" | "faviconUrl", max: number, e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file later
+    if (!f) return;
+    setB((s) => ({ ...s, [field]: "" })); // brief reset for feedback
+    const dataUrl = await fileToDataUrl(f, max);
+    setB((s) => ({ ...s, [field]: dataUrl }));
+  }
+
   return (
     <div className="space-y-6">
       <form onSubmit={saveBranding} className="card card-pad">
@@ -69,8 +136,16 @@ export function ConfigCenter({
               <input className="input" value={b.secondaryColor} onChange={set("secondaryColor")} placeholder="#e6b566" />
             </div>
           </div>
-          <div><label className="label">Logo URL</label><input className="input" value={b.logoUrl} onChange={set("logoUrl")} placeholder="https://…/logo.png" /></div>
-          <div><label className="label">Favicon URL</label><input className="input" value={b.faviconUrl} onChange={set("faviconUrl")} placeholder="https://…/favicon.ico" /></div>
+          <ImageField
+            label="Logo" hint="Shown in the sidebar and on sign-in. PNG/JPG/SVG; auto-resized."
+            value={b.logoUrl} onUrl={set("logoUrl")} onFile={(e) => pickImage("logoUrl", 256, e)}
+            onClear={() => setB((s) => ({ ...s, logoUrl: "" }))}
+          />
+          <ImageField
+            label="Tab icon (favicon)" hint="Shown in the browser tab. Auto-resized to 64px."
+            value={b.faviconUrl} onUrl={set("faviconUrl")} onFile={(e) => pickImage("faviconUrl", 64, e)}
+            onClear={() => setB((s) => ({ ...s, faviconUrl: "" }))}
+          />
           <div className="sm:col-span-2"><label className="label">Login banner URL</label><input className="input" value={b.loginBannerUrl} onChange={set("loginBannerUrl")} placeholder="https://…/banner.jpg" /></div>
           <div><label className="label">Support email</label><input className="input" value={b.supportEmail} onChange={set("supportEmail")} placeholder="support@youragency.com" /></div>
           <div><label className="label">Support phone</label><input className="input" value={b.supportPhone} onChange={set("supportPhone")} placeholder="(305) 555-0142" /></div>

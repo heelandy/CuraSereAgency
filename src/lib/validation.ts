@@ -28,6 +28,10 @@ export const optionalMoney = z.preprocess(emptyToNull, z.coerce.number().min(0).
 export const id = z.string().min(1);
 export const optionalId = z.preprocess(emptyToNull, z.string().nullable().optional());
 export const email = z.preprocess(emptyToNull, z.string().email().nullable().optional());
+// Image reference: a normal URL OR an inline data: URL from a small uploaded image
+// (stored as base64 in a TEXT column). Larger cap than optionalShort so an
+// uploaded favicon/logo fits; the upload UI resizes images to keep this small.
+export const imageRef = z.preprocess(emptyToNull, z.string().trim().max(700_000).nullable().optional());
 
 // Boolean coercion footgun guard (APP_BLUEPRINT §8): z.coerce.boolean('false')===true.
 export const bool = z.union([

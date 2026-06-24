@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { handle, json, Errors } from "@/lib/http";
 import { mutationGuard, RateLimits } from "@/lib/rate-limit";
 import { logAdmin } from "@/lib/audit";
-import { shortText, optionalShort } from "@/lib/validation";
+import { shortText, optionalShort, imageRef } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +13,9 @@ const schema = z.object({
   name: shortText, legalName: optionalShort, npi: optionalShort, email: optionalShort,
   phone: optionalShort, addressLine: optionalShort, city: optionalShort,
   state: optionalShort, zip: optionalShort, timezone: optionalShort,
-  // White-label branding (resolved at runtime by host — see lib/branding.ts)
-  slug: optionalShort, logoUrl: optionalShort, faviconUrl: optionalShort,
+  // White-label branding (resolved at runtime by host — see lib/branding.ts).
+  // logoUrl/faviconUrl accept an uploaded image as a data: URL (imageRef).
+  slug: optionalShort, logoUrl: imageRef, faviconUrl: imageRef,
   primaryColor: optionalShort, secondaryColor: optionalShort, portalName: optionalShort,
   loginBannerUrl: optionalShort, customCss: z.string().trim().max(20000).nullable().optional(),
   supportEmail: optionalShort, supportPhone: optionalShort, emailFromName: optionalShort, pdfFooter: optionalShort,
