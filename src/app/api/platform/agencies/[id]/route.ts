@@ -12,6 +12,8 @@ const schema = z.object({
   active: z.boolean().optional(),
   plan: z.enum(Object.keys(PLAN) as [string, ...string[]]).optional(),
   subscriptionStatus: z.string().max(40).optional(),
+  verificationStatus: z.enum(["PENDING", "VERIFIED", "REJECTED"]).optional(),
+  verificationNotes: z.string().max(2000).optional(),
 });
 
 // Platform super-admin: suspend/reactivate an agency or change its plan/status.
@@ -30,8 +32,14 @@ export function PATCH(req: Request, { params }: { params: { id: string } }) {
         ...(data.active !== undefined ? { active: data.active } : {}),
         ...(data.plan ? { plan: data.plan } : {}),
         ...(data.subscriptionStatus ? { subscriptionStatus: data.subscriptionStatus } : {}),
+        ...(data.verificationStatus ? {
+          verificationStatus: data.verificationStatus,
+          verifiedAt: data.verificationStatus === "VERIFIED" ? new Date() : null,
+          verifiedById: data.verificationStatus === "VERIFIED" ? ctx.userId : null,
+        } : {}),
+        ...(data.verificationNotes !== undefined ? { verificationNotes: data.verificationNotes } : {}),
       },
-      select: { id: true, active: true, plan: true, subscriptionStatus: true },
+      select: { id: true, active: true, plan: true, subscriptionStatus: true, verificationStatus: true },
     });
     await logAdmin(ctx, { action: "platform.agency.update", target: params.id, newValue: JSON.stringify(data) });
     return json(updated);

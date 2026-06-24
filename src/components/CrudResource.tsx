@@ -36,6 +36,8 @@ export type CrudConfig = {
   fields: Field[];
   subtitle?: string;
   readOnly?: boolean;
+  /** When false, rows can be added/edited but never deleted (e.g. clinical notes). */
+  deletable?: boolean;
   /** Hidden fixed values merged into every create (e.g. patientId on a detail page). */
   fixed?: Record<string, string>;
   /** Render compact (no page header) — used when embedded in a detail page. */
@@ -267,7 +269,9 @@ export function CrudResource(cfg: CrudConfig) {
                         {!cfg.readOnly && (
                           <>
                             <button className="btn-ghost btn-sm" onClick={() => openModal(row)}>Edit</button>
-                            <button className="btn-ghost btn-sm text-red-600" onClick={() => remove(row)}>Delete</button>
+                            {cfg.deletable !== false && (
+                              <button className="btn-ghost btn-sm text-red-600" onClick={() => remove(row)}>Delete</button>
+                            )}
                           </>
                         )}
                       </td>

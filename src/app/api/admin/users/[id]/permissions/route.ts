@@ -35,8 +35,9 @@ export function PUT(req: Request, { params }: { params: { id: string } }) {
     const { capabilities } = schema.parse(await req.json().catch(() => ({})));
     const clean = [...new Set(capabilities.filter((c) => GRANTABLE.has(c as never)))];
 
-    const user = await prisma.user.findFirst({ where: { id: params.id, agencyId: ctx.agencyId }, select: { id: true } });
+    const user = await prisma.user.findFirst({ where: { id: params.id, agencyId: ctx.agencyId }, select: { id: true, role: true } });
     if (!user) throw Errors.notFound();
+    if (user.role === "PLATFORM_OWNER") throw Errors.forbidden("The platform owner's permissions can't be changed.");
 
     await prisma.user.update({ where: { id: user.id }, data: { extraCapabilities: JSON.stringify(clean) } });
     await logAdmin(ctx, { action: "user.permissions.update", target: user.id, newValue: clean.join(",") || "(none)" });

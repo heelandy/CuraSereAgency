@@ -24,6 +24,7 @@ async function main() {
     data: {
       name: "Cura_Sera Home Care",
       legalName: "Cura_Sera Home Care LLC",
+      npi: "1457308076",
       networkId: network.id,
       email: "care@curasera.com",
       phone: "(305) 555-0142",
@@ -31,6 +32,7 @@ async function main() {
       city: "Miami", state: "FL", zip: "33131",
       plan: "PROFESSIONAL", subscriptionStatus: "active",
       trialEndsAt: daysFromNow(30),
+      verificationStatus: "VERIFIED", verifiedAt: daysFromNow(-30), npiVerified: true,
       // White-label branding (teal default)
       slug: "curasera", portalName: "Cura_Sera Home Care",
       primaryColor: "#1f775c", secondaryColor: "#e6b566",
@@ -381,15 +383,39 @@ async function main() {
     },
   });
 
+  // Demo support tickets (agency ⇄ platform help desk)
+  const ownerUser = await prisma.user.findFirst({ where: { agencyId: agency.id, role: "AGENCY_OWNER" } });
+  if (ownerUser) {
+    await prisma.supportTicket.create({
+      data: {
+        agencyId: agency.id, createdById: ownerUser.id, createdByName: ownerUser.name,
+        subject: "How do I add a second branch?", category: "TECHNICAL", priority: "NORMAL", status: "IN_PROGRESS",
+        messages: { create: [
+          { authorId: ownerUser.id, authorName: ownerUser.name, fromPlatform: false, body: "We're opening a new office in Fort Lauderdale — how do I add a branch?" },
+          { authorName: "Platform Support", fromPlatform: true, body: "Go to Administration → Branches → New branch. Want multi-branch reporting enabled too?" },
+        ] },
+      },
+    });
+    await prisma.supportTicket.create({
+      data: {
+        agencyId: agency.id, createdById: ownerUser.id, createdByName: ownerUser.name,
+        subject: "Stripe payouts not showing yet", category: "BILLING", priority: "HIGH", status: "OPEN",
+        messages: { create: { authorId: ownerUser.id, authorName: ownerUser.name, fromPlatform: false, body: "I connected Stripe but payouts aren't appearing. Can you check?" } },
+      },
+    });
+  }
+
   // ── SECOND AGENCY (white-label demo) ───────────────────────────────────────
   // Same codebase, different DATA → different brand. Visit http://sunrise.localhost:3000
   // (or sunrisecare.localhost) to see Sunrise's blue theme + portal name on login.
   const sunrise = await prisma.agency.create({
     data: {
       name: "Sunrise Care", legalName: "Sunrise Care Services LLC", networkId: network.id,
+      npi: "1538160938",
       email: "hello@sunrisecare.com", phone: "(407) 555-0199",
       addressLine: "55 Orange Ave", city: "Orlando", state: "FL", zip: "32801",
       plan: "STARTER", subscriptionStatus: "active", trialEndsAt: daysFromNow(30),
+      verificationStatus: "VERIFIED", verifiedAt: daysFromNow(-20), npiVerified: true,
       slug: "sunrise", portalName: "Sunrise Care Portal",
       primaryColor: "#2563eb", secondaryColor: "#f59e0b",
       supportEmail: "support@sunrisecare.com", supportPhone: "(407) 555-0199",

@@ -175,6 +175,7 @@ export const resources = {
     schema: V.visitNoteSchema,
     include: { patient: patientName },
     stamp: (ctx) => ({ authorId: ctx.userId }),
+    noDelete: true, // clinical/legal record — never deletable (edit only)
   },
   assessments: {
     delegate: "assessment", rateScope: "assessment",

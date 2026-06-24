@@ -14,11 +14,14 @@ const SAFE = {
 };
 
 // Users & roles (Phase 19). Passwords are hashed server-side; hashes never returned.
+// The PLATFORM_OWNER (super-admin) is system-level and is NEVER listed in any
+// agency's roster, messaging, or permissions surfaces.
 export function GET() {
   return handle(async () => {
     const ctx = await requireCap("admin:manage");
     const users = await prisma.user.findMany({
-      where: { agencyId: ctx.agencyId }, select: SAFE, orderBy: { name: "asc" },
+      where: { agencyId: ctx.agencyId, role: { not: "PLATFORM_OWNER" } },
+      select: SAFE, orderBy: { name: "asc" },
     });
     return json(users);
   });
@@ -29,6 +32,7 @@ export function POST(req: Request) {
     const ctx = await requireCap("admin:manage");
     mutationGuard(req, "adminUser", ctx.userId, RateLimits.write);
     const data = userSchema.parse(await req.json().catch(() => ({})));
+    if (data.role === "PLATFORM_OWNER") throw Errors.forbidden("The platform owner is system-level and can't be created here.");
     if (!data.password) throw Errors.badRequest("Password is required for new users");
 
     const email = data.email.toLowerCase().trim();

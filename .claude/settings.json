@@ -19,7 +19,11 @@
       "PowerShell(npx prisma generate --skip-generate 2>$null)",
       "PowerShell(Get-Process node -ErrorAction SilentlyContinue)",
       "PowerShell(Stop-Process -Force)",
-      "PowerShell($env:BROWSER='none'; npm run dev)"
+      "PowerShell($env:BROWSER='none'; npm run dev)",
+      "PowerShell(npm run db:seed)",
+      "PowerShell($env:BROWSER='none'; npm run dev -- -p 3001)",
+      "PowerShell(Get-Process node -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Milliseconds 800; $env:BROWSER='none'; npm run dev -- -p 3001)",
+      "PowerShell($p = Get-Process node -ErrorAction SilentlyContinue; if \\($p\\) { \"node running: $\\($p.Count\\)\" } else { \"NO node process\" }; try { $r = Invoke-WebRequest -Uri http://localhost:3001/login -UseBasicParsing -TimeoutSec 8; \"HTTP $\\($r.StatusCode\\) on 3001\" } catch { \"3001 request failed: $\\($_.Exception.Message\\)\" })"
     ]
   }
 }

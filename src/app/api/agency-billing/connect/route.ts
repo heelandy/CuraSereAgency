@@ -1,4 +1,4 @@
-import { requireCap } from "@/lib/authz";
+import { requireCap, requireVerified } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
 import { handle, json, Errors } from "@/lib/http";
 import { mutationGuard, RateLimits } from "@/lib/rate-limit";
@@ -42,6 +42,7 @@ export function GET() {
 export function POST(req: Request) {
   return handle(async () => {
     const ctx = await requireCap("billing:write");
+    requireVerified(ctx); // can't go live with payments until the agency is verified
     mutationGuard(req, "connect", ctx.userId, RateLimits.write);
     if (!(await stripeBillingEnabled())) throw Errors.badRequest("Stripe is disabled by the platform administrator.");
     const agency = await prisma.agency.findUnique({ where: { id: ctx.agencyId }, select: connectAgencySelect });

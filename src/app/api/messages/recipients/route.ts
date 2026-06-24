@@ -19,6 +19,7 @@ export function GET() {
       where: {
         agencyId: ctx.agencyId, active: true, id: { not: ctx.userId },
         role: roleCondition,
+        NOT: { role: "PLATFORM_OWNER" }, // super-admin is never a messaging target
       },
       select: { id: true, name: true, role: true },
       orderBy: { name: "asc" },

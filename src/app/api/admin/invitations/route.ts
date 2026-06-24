@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { requireCap } from "@/lib/authz";
+import { requireCap, requireVerified } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
 import { handle, json, Errors } from "@/lib/http";
 import { mutationGuard, RateLimits } from "@/lib/rate-limit";
@@ -31,6 +31,7 @@ export function GET() {
 export function POST(req: Request) {
   return handle(async () => {
     const ctx = await requireCap("admin:manage");
+    requireVerified(ctx); // can't add staff until the agency is verified
     mutationGuard(req, "invite", ctx.userId, RateLimits.write);
     const data = inviteCreateSchema.parse(await req.json().catch(() => ({})));
 

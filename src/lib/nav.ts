@@ -18,6 +18,8 @@ export const NAV: NavGroup[] = [
     items: [
       { label: "Dashboard", href: "/dashboard", icon: "home" },
       { label: "Analytics", href: "/dashboard/analytics", icon: "chart", caps: ["analytics:read"] },
+      // Support is open to every staff member (no capability gate).
+      { label: "Support", href: "/dashboard/support", icon: "chat" },
     ],
   },
   {

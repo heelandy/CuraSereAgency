@@ -18,6 +18,7 @@ export function GET() {
       orderBy: { createdAt: "desc" },
       select: {
         id: true, name: true, slug: true, plan: true, subscriptionStatus: true, active: true, createdAt: true,
+        verificationStatus: true, legalName: true, npi: true, licenseNumber: true, npiVerified: true, npiLookupResult: true, verificationNotes: true,
         _count: { select: { users: true, patients: true, caregivers: true, branches: true, visits: true } },
       },
     });

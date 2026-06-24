@@ -278,6 +278,7 @@ export type Ctx = {
   name: string;
   branchId: string | null;
   impersonating: boolean; // platform owner is viewing another agency ("view as")
+  agencyVerified: boolean; // agency passed authenticity verification (else strict-minimum)
 };
 
 // Cookie the platform owner sets to "view as" a specific agency.
@@ -309,6 +310,14 @@ export async function getOptionalUser(): Promise<Ctx | null> {
     }
   }
 
+  // Authenticity gate: agency users get strict-minimum access until the agency is
+  // VERIFIED. The platform owner is never gated (even while impersonating).
+  let agencyVerified = true;
+  if (user.role !== "PLATFORM_OWNER") {
+    const ag = await prisma.agency.findUnique({ where: { id: agencyId }, select: { verificationStatus: true } });
+    agencyVerified = ag?.verificationStatus === "VERIFIED";
+  }
+
   return {
     userId: user.id,
     agencyId,
@@ -319,6 +328,7 @@ export async function getOptionalUser(): Promise<Ctx | null> {
     name: user.name,
     branchId: impersonating ? null : user.branchId, // agency-wide when impersonating
     impersonating,
+    agencyVerified,
   };
 }
 
@@ -341,4 +351,12 @@ export async function requireCap(cap: Capability): Promise<Ctx> {
   const ctx = await requireUser();
   requireCapability(ctx, cap);
   return ctx;
+}
+
+// Authenticity gate for operational actions: an unverified agency may browse but
+// not operate (create/modify data, invite staff, go live). Platform owner exempt.
+export function requireVerified(ctx: Ctx): void {
+  if (!ctx.agencyVerified) {
+    throw Errors.forbidden("Your agency is pending verification — this becomes available once it's approved.");
+  }
 }

@@ -123,6 +123,8 @@ export const resourceDefs: Record<string, CrudConfig> = {
   "visit-notes": {
     title: "Visit Notes", singular: "Note", resource: "visit-notes",
     subtitle: "SOAP, progress and observation notes",
+    deletable: false, // clinical/legal record — editable but never deletable
+
     columns: [
       { key: "patient", label: "Patient", type: "fullName", accessor: "patient" },
       { key: "type", label: "Type", labelMap: E.NOTE_TYPE },

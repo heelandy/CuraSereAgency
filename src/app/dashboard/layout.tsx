@@ -25,7 +25,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
     isPlatform ? Promise.resolve(PLATFORM_DEFAULT) : getAgencyBranding(ctx.agencyId),
     isPlatform ? Promise.resolve(null) : prisma.agency.findUnique({ where: { id: ctx.agencyId }, select: { featureFlags: true } }),
   ]);
-  const groups = filterNav(ctx.caps, isPlatform ? undefined : parseFlags(agency?.featureFlags));
+  let groups = filterNav(ctx.caps, isPlatform ? undefined : parseFlags(agency?.featureFlags));
+  // Strict-minimum until an agency is verified: only Dashboard + Support remain.
+  const unverified = !isPlatform && !ctx.agencyVerified;
+  if (unverified) {
+    const MINIMAL = new Set(["/dashboard", "/dashboard/support"]);
+    groups = groups
+      .map((g) => ({ ...g, items: g.items.filter((i) => MINIMAL.has(i.href)) }))
+      .filter((g) => g.items.length > 0);
+  }
   const brand = { name: branding.portalName, logoUrl: branding.logoUrl };
 
   return (
@@ -38,6 +46,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
       />
       <main className="md:pl-64">
         {ctx.impersonating && <PlatformBanner agencyName={brand.name} />}
+        {unverified && (
+          <div className="bg-amber-500 px-4 py-2 text-sm text-white">
+            Your agency is <strong>pending verification</strong> — access is limited until our team approves your account.
+          </div>
+        )}
         <header className="sticky top-0 z-20 hidden items-center justify-end border-b border-surface-200 bg-surface-50/80 px-8 py-2.5 backdrop-blur md:flex">
           <NotificationBell />
         </header>

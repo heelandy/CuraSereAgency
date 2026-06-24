@@ -16,8 +16,11 @@ export function PATCH(req: Request, { params }: { params: { id: string } }) {
     mutationGuard(req, "adminUser", ctx.userId, RateLimits.write);
     const existing = await prisma.user.findFirst({ where: { id: params.id, agencyId: ctx.agencyId } });
     if (!existing) throw Errors.notFound();
+    // The platform owner is untouchable from agency admin: can't be edited or promoted-to.
+    if (existing.role === "PLATFORM_OWNER") throw Errors.forbidden("The platform owner account can't be modified here.");
 
     const data = userSchema.partial().parse(await req.json().catch(() => ({})));
+    if (data.role === "PLATFORM_OWNER") throw Errors.forbidden("Users can't be promoted to platform owner.");
     const update: Record<string, unknown> = {};
     if (data.name !== undefined) update.name = data.name;
     if (data.role !== undefined) update.role = data.role;
@@ -43,6 +46,7 @@ export function DELETE(req: Request, { params }: { params: { id: string } }) {
     if (params.id === ctx.userId) throw Errors.badRequest("You can't delete your own account");
     const existing = await prisma.user.findFirst({ where: { id: params.id, agencyId: ctx.agencyId } });
     if (!existing) throw Errors.notFound();
+    if (existing.role === "PLATFORM_OWNER") throw Errors.forbidden("The platform owner account can't be deleted.");
     await prisma.user.delete({ where: { id: params.id } });
     await logAdmin(ctx, { action: "user.delete", target: params.id });
     return json({ ok: true });

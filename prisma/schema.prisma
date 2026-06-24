@@ -42,6 +42,62 @@ model PlatformSetting {
   updatedAt DateTime @updatedAt
 }
 
+// Support tickets — a tenant raises an issue to the platform; both sides see the
+// thread. The agency user who opened it (and their agency admins) see it on the
+// agency side; the platform owner sees ALL tickets in the super-admin console.
+model SupportTicket {
+  id            String   @id @default(cuid())
+  agency        Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId      String
+  createdById   String?  // agency user who opened it
+  createdByName String?
+  subject       String
+  category      String   @default("GENERAL") // GENERAL|TECHNICAL|BILLING|FEATURE_REQUEST|ACCOUNT
+  priority      String   @default("NORMAL")  // LOW|NORMAL|HIGH|URGENT
+  status        String   @default("OPEN")    // OPEN|IN_PROGRESS|RESOLVED|CLOSED
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  messages      SupportMessage[]
+
+  @@index([agencyId])
+  @@index([createdById])
+  @@index([status])
+}
+
+model SupportMessage {
+  id           String        @id @default(cuid())
+  ticket       SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticketId     String
+  authorId     String?
+  authorName   String?
+  fromPlatform Boolean       @default(false) // true = reply from platform support (super-admin)
+  body         String
+  createdAt    DateTime      @default(now())
+
+  @@index([ticketId])
+}
+
+// Soft-delete archive. Deletes through the CRUD factory snapshot the row here
+// (JSON) BEFORE removing the live record, so nothing is permanently lost and the
+// platform owner can review what each user deleted (super-admin "deleted items"
+// log). Tenant-scoped for isolation; visible only via platform:manage.
+model DeletedRecord {
+  id            String   @id @default(cuid())
+  agency        Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyId      String
+  resource      String   // Prisma model key, e.g. "patient"
+  recordId      String   // id of the removed row
+  label         String?  // human summary (name/title/number) for the log
+  data          String   // full JSON snapshot of the deleted row
+  deletedById   String?  // user who performed the delete
+  deletedByName String?
+  createdAt     DateTime @default(now())
+
+  @@index([agencyId])
+  @@index([deletedById])
+  @@index([resource])
+}
+
 model Agency {
   id        String         @id @default(cuid())
   name      String
@@ -70,6 +126,17 @@ model Agency {
   stripeConnectId               String? // acct_xxx (connected account)
   stripeConnectChargesEnabled   Boolean @default(false)
   stripeConnectDetailsSubmitted Boolean @default(false)
+
+  // Authenticity verification — the platform vets a new agency (NPI auto-checked
+  // against the national NPPES registry + manual super-admin review) before it can
+  // operate. Until VERIFIED only the strict minimum is available.
+  verificationStatus String   @default("PENDING") // PENDING|VERIFIED|REJECTED
+  licenseNumber      String? // state operating license #
+  npiVerified        Boolean  @default(false) // auto NPPES lookup matched
+  npiLookupResult    String? // human-readable summary of the NPPES lookup
+  verifiedAt         DateTime?
+  verifiedById       String? // platform user who reviewed
+  verificationNotes  String? // reviewer notes / rejection reason
 
   // White-label branding + configuration (Agency Configuration Center).
   // Resolved at runtime by host; all customization is DATA, never code.
@@ -140,6 +207,8 @@ model Agency {
   formTemplates        FormTemplate[]
   integrations         IntegrationSetting[]
   recurringPlans       RecurringPlan[]
+  deletedRecords       DeletedRecord[]
+  supportTickets       SupportTicket[]
 
   @@index([networkId])
 }

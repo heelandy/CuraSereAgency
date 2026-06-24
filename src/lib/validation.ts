@@ -10,6 +10,7 @@ import {
   GENDER, MED_LOG_STATUS, TIME_OF_DAY, CARE_TASK_STATUS, REQUEST_TYPE,
   TIME_ENTRY_TYPE, TIME_ENTRY_STATUS, PTO_TYPE, PTO_STATUS, MILEAGE_TYPE, MILEAGE_STATUS,
   EMPLOYMENT_TYPE, FORM_CATEGORY, INVITABLE_ROLES,
+  SUPPORT_CATEGORY, SUPPORT_PRIORITY, SUPPORT_STATUS,
 } from "./enums";
 
 // ── Helpers (APP_BLUEPRINT §8) ───────────────────────────────────────────────
@@ -541,11 +542,45 @@ export const scheduleRequestReviewSchema = z.object({
 });
 
 // ── Self-serve signup (creates a new agency + its Agency Owner) ───────────────
+// Optional white-label fields are gathered at registration so the new tenant is
+// branded from day one (all of it is plain agency config — see APP_BLUEPRINT §16.13).
 export const signupSchema = z.object({
   agencyName: shortText,
   name: shortText,
   email: z.string().trim().toLowerCase().email("Enter a valid email"),
   password: z.string().min(8, "Use at least 8 characters").max(200),
+  // Authenticity — verified against NPPES + manual review before the agency operates.
+  legalName: shortText,
+  npi: z.string().trim().regex(/^\d{10}$/, "Enter the agency's 10-digit NPI"),
+  licenseNumber: optionalShort,
+  // White-label / branding (all optional)
+  portalName: optionalShort,
+  slug: optionalShort, // desired subdomain <slug>.platform — ignored if taken
+  primaryColor: optionalShort, // hex, e.g. #1f775c
+  secondaryColor: optionalShort,
+  logoUrl: optionalShort,
+  supportEmail: email,
+  supportPhone: optionalShort,
+});
+
+// ── Agency authenticity (re)submission ───────────────────────────────────────
+export const agencyVerificationSchema = z.object({
+  legalName: shortText,
+  npi: z.string().trim().regex(/^\d{10}$/, "Enter the agency's 10-digit NPI"),
+  licenseNumber: optionalShort,
+});
+
+// ── Support tickets (agency ⇄ platform help desk) ────────────────────────────
+export const supportTicketSchema = z.object({
+  subject: shortText,
+  category: enumOf(SUPPORT_CATEGORY).default("GENERAL"),
+  priority: enumOf(SUPPORT_PRIORITY).default("NORMAL"),
+  body: requiredLong, // first message
+});
+export const supportMessageSchema = z.object({ body: requiredLong });
+export const supportUpdateSchema = z.object({
+  status: enumOf(SUPPORT_STATUS).optional(),
+  priority: enumOf(SUPPORT_PRIORITY).optional(),
 });
 
 // ── Employee invitations (agency sends a link; invitee registers into it) ─────

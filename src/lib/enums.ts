@@ -393,6 +393,27 @@ export const FEATURE_FLAGS = {
 } as const;
 export type FeatureKey = keyof typeof FEATURE_FLAGS;
 
+// ── Support tickets ──────────────────────────────────────────────────────────
+export const SUPPORT_CATEGORY = {
+  GENERAL: "General",
+  TECHNICAL: "Technical",
+  BILLING: "Billing",
+  FEATURE_REQUEST: "Feature Request",
+  ACCOUNT: "Account",
+} as const;
+export const SUPPORT_PRIORITY = {
+  LOW: "Low",
+  NORMAL: "Normal",
+  HIGH: "High",
+  URGENT: "Urgent",
+} as const;
+export const SUPPORT_STATUS = {
+  OPEN: "Open",
+  IN_PROGRESS: "In Progress",
+  RESOLVED: "Resolved",
+  CLOSED: "Closed",
+} as const;
+
 // ── AI modules (Phase 18/34) ─────────────────────────────────────────────────
 export const AI_MODULE = {
   SCHEDULER: "AI Scheduler",

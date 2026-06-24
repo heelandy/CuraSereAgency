@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { prisma } from "./prisma";
 import { handle, json, Errors } from "./http";
-import { requireUser, requireCapability, seesAllBranches, type Capability, type Ctx } from "./authz";
+import { requireUser, requireCapability, requireVerified, seesAllBranches, type Capability, type Ctx } from "./authz";
 import { mutationGuard, RateLimits } from "./rate-limit";
 import { logAdmin } from "./audit";
 import { encryptField, decryptField } from "./crypto";
@@ -52,6 +52,15 @@ export interface ResourceConfig {
   branchField?: string;
   /** Log a sensitive read on item GET (audit-on-view). */
   auditView?: boolean;
+  /** Block deletion entirely (e.g. clinical visit notes are legal records). */
+  noDelete?: boolean;
+}
+
+// Short human label for the deleted-items log (name / title / number, else id).
+function rowLabel(row: Record<string, unknown>): string {
+  const r = row as Record<string, string | undefined>;
+  const name = `${r.firstName ?? ""} ${r.lastName ?? ""}`.trim();
+  return (name || r.name || r.title || r.number || r.prospectName || r.id || "") as string;
 }
 
 function encryptData(cfg: ResourceConfig, data: Record<string, unknown>) {
@@ -157,6 +166,7 @@ export function collection(cfg: ResourceConfig) {
       handle(async () => {
         const ctx = await requireUser();
         requireCapability(ctx, cfg.writeCap);
+        requireVerified(ctx); // unverified agencies can't create data
         mutationGuard(req, cfg.rateScope, ctx.userId, RateLimits.write);
 
         const body = await req.json().catch(() => ({}));
@@ -211,6 +221,7 @@ export function item(cfg: ResourceConfig) {
       handle(async () => {
         const ctx = await requireUser();
         requireCapability(ctx, cfg.writeCap);
+        requireVerified(ctx);
         mutationGuard(req, cfg.rateScope, ctx.userId, RateLimits.write);
         const existing = await findOwned(ctx, params.id);
 
@@ -232,9 +243,29 @@ export function item(cfg: ResourceConfig) {
       handle(async () => {
         const ctx = await requireUser();
         requireCapability(ctx, cfg.writeCap);
+        requireVerified(ctx);
         mutationGuard(req, cfg.rateScope, ctx.userId, RateLimits.write);
-        await findOwned(ctx, params.id);
-        await model(cfg.delegate).delete({ where: { id: params.id } });
+        // Some record types are never deletable (e.g. clinical visit notes).
+        if (cfg.noDelete) throw Errors.forbidden(`${cfg.delegate} records cannot be deleted.`);
+
+        const row = await findOwned(ctx, params.id);
+        // Soft delete: snapshot the row into the deleted-items archive, THEN remove
+        // the live record — atomically, so a failed archive aborts the delete and
+        // nothing is ever lost. The platform owner reviews these per user.
+        await prisma.$transaction([
+          prisma.deletedRecord.create({
+            data: {
+              agencyId: ctx.agencyId,
+              resource: cfg.delegate,
+              recordId: params.id,
+              label: rowLabel(row).slice(0, 200) || null,
+              data: JSON.stringify(row),
+              deletedById: ctx.userId,
+              deletedByName: ctx.name,
+            },
+          }),
+          model(cfg.delegate).delete({ where: { id: params.id } }),
+        ]);
         await logAdmin(ctx, { action: `${cfg.delegate}.delete`, target: params.id });
         return json({ ok: true });
       }),

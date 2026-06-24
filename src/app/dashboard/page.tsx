@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { StatCard, SectionCard, Badge, PageHeader } from "@/components/ui";
 import { UsersIcon, UserIcon, CalendarIcon, DollarIcon, ShieldIcon, HeartIcon } from "@/components/icons";
 import { CaregiverHome } from "@/components/CaregiverHome";
+import { VerificationPending } from "@/components/VerificationPending";
 import { fmtDateTime, fmtDate, fmtMoney, fullName, daysUntil } from "@/lib/format";
 import { VISIT_STATUS, INCIDENT_TYPE, SEVERITY } from "@/lib/enums";
 
@@ -15,6 +16,27 @@ export default async function DashboardOverview() {
   // System super-admin lands on the platform-wide monitor, not a single agency —
   // unless they're actively "viewing as" a specific tenant.
   if (ctx.role === "PLATFORM_OWNER" && !ctx.impersonating) redirect("/dashboard/platform");
+
+  // Unverified agency → strict-minimum: show the verification status + resubmit
+  // instead of the operational dashboard.
+  if (!ctx.agencyVerified) {
+    const a = await prisma.agency.findUnique({
+      where: { id: ctx.agencyId },
+      select: { verificationStatus: true, legalName: true, npi: true, licenseNumber: true, npiVerified: true, npiLookupResult: true, verificationNotes: true },
+    });
+    return (
+      <VerificationPending
+        status={a?.verificationStatus ?? "PENDING"}
+        legalName={a?.legalName ?? ""}
+        npi={a?.npi ?? ""}
+        licenseNumber={a?.licenseNumber ?? ""}
+        npiVerified={Boolean(a?.npiVerified)}
+        lookupResult={a?.npiLookupResult ?? null}
+        notes={a?.verificationNotes ?? null}
+        canEdit={can(ctx, "admin:manage")}
+      />
+    );
+  }
   // Field staff (caregivers/RN/LPN/HHA) get a personal, assignment-scoped home —
   // never agency-wide patient/caregiver/visit figures.
   if (patientAssignmentScoped(ctx.role)) return <CaregiverHome ctx={ctx} />;

@@ -6,6 +6,7 @@ import { mutationGuard, RateLimits } from "@/lib/rate-limit";
 import { signupSchema } from "@/lib/validation";
 import { sendMail } from "@/lib/mail";
 import { config } from "@/lib/config";
+import { lookupNpi } from "@/lib/npi";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,11 +27,39 @@ export function POST(req: Request) {
     const passwordHash = await bcrypt.hash(data.password, 12);
     const token = crypto.randomBytes(24).toString("base64url");
 
+    // Auto-check the NPI against the national NPPES registry. This INFORMS the
+    // platform owner's review — it never auto-approves. New agencies stay PENDING.
+    const npi = await lookupNpi(data.npi, data.legalName);
+
+    // Normalize the requested subdomain; only use it if it's free (else leave it
+    // unset — the owner can pick one later in the Configuration Center).
+    let slug: string | undefined;
+    if (data.slug) {
+      const normalized = data.slug.toLowerCase().replace(/[^a-z0-9-]/g, "").replace(/^-+|-+$/g, "").slice(0, 40);
+      if (normalized) {
+        const taken = await prisma.agency.findUnique({ where: { slug: normalized }, select: { id: true } });
+        if (!taken) slug = normalized;
+      }
+    }
+
     const { user } = await prisma.$transaction(async (tx) => {
       const agency = await tx.agency.create({
         data: {
           name: data.agencyName,
-          portalName: data.agencyName,
+          portalName: data.portalName || data.agencyName,
+          slug,
+          legalName: data.legalName,
+          npi: data.npi,
+          licenseNumber: data.licenseNumber || undefined,
+          // Pending until the platform owner approves (auto NPI check is advisory).
+          verificationStatus: "PENDING",
+          npiVerified: npi.matched,
+          npiLookupResult: npi.summary,
+          primaryColor: data.primaryColor || undefined,
+          secondaryColor: data.secondaryColor || undefined,
+          logoUrl: data.logoUrl || undefined,
+          supportEmail: data.supportEmail || undefined,
+          supportPhone: data.supportPhone || undefined,
           plan: "STARTER",
           subscriptionStatus: "trialing",
           trialEndsAt: new Date(Date.now() + 14 * 86_400_000),
