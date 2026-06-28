@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "./prisma";
 import { handle, json, Errors } from "./http";
 import { requireUser, requireCapability, requireVerified, seesAllBranches, type Capability, type Ctx } from "./authz";
@@ -88,6 +89,47 @@ function model(delegate: string): any {
   return (prisma as any)[delegate];
 }
 
+// ── Search + filter helpers (DB-side, from the Prisma schema via DMMF) ─────────
+const PAGE_SIZE_MAX = 100;
+const scalarCache = new Map<string, { strings: string[]; names: Set<string> }>();
+function modelFields(delegate: string): { strings: string[]; names: Set<string> } {
+  const cached = scalarCache.get(delegate);
+  if (cached) return cached;
+  const m = Prisma.dmmf.datamodel.models.find((mm) => mm.name.toLowerCase() === delegate.toLowerCase());
+  const scalars = m ? m.fields.filter((f) => f.kind === "scalar") : [];
+  const out = {
+    strings: scalars.filter((f) => f.type === "String").map((f) => f.name),
+    names: new Set(scalars.map((f) => f.name)),
+  };
+  scalarCache.set(delegate, out);
+  return out;
+}
+
+// DB-side search over the model's own String columns + the common patient/
+// caregiver name relations (when included). NOTE: `contains` is case-insensitive
+// on SQLite; on PostgreSQL add `mode: 'insensitive'`.
+function searchClause(cfg: ResourceConfig, q: string): Record<string, unknown> | null {
+  if (!q) return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const or: any[] = modelFields(cfg.delegate).strings.map((f) => ({ [f]: { contains: q } }));
+  const inc = (cfg.include ?? {}) as Record<string, unknown>;
+  if ("patient" in inc) or.push({ patient: { firstName: { contains: q } } }, { patient: { lastName: { contains: q } } });
+  if ("caregiver" in inc) or.push({ caregiver: { firstName: { contains: q } } }, { caregiver: { lastName: { contains: q } } });
+  return or.length ? { OR: or } : null;
+}
+
+// Fixed FK filters for child lists (e.g. ?patientId=…). Only accepts `*Id` params
+// that are REAL scalar columns on the model — safe (tenant scope still applies)
+// and avoids querying a non-existent column.
+function fkFilters(cfg: ResourceConfig, url: URL): Record<string, unknown> {
+  const { names } = modelFields(cfg.delegate);
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of url.searchParams.entries()) {
+    if (k.endsWith("Id") && v && names.has(k)) out[k] = v;
+  }
+  return out;
+}
+
 function baseWhere(cfg: ResourceConfig, ctx: Ctx, extra: Record<string, unknown> = {}) {
   const scope = cfg.scope ?? { mode: "agency" };
   const listWhere = cfg.listWhere?.(ctx) ?? {};
@@ -142,24 +184,34 @@ export function collection(cfg: ResourceConfig) {
         const ctx = await requireUser();
         requireCapability(ctx, cfg.readCap);
         const url = new URL(req.url);
-        const q = url.searchParams.get("q")?.trim();
-        const extra: Record<string, unknown> = {};
-        // simple search passthrough if model has firstName/lastName/name
-        const where = baseWhere(cfg, ctx, extra);
-        let rows = await model(cfg.delegate).findMany({
-          where,
-          include: cfg.include,
-          orderBy: cfg.orderBy ?? { createdAt: "desc" },
-          take: 500,
-        });
-        if (q) {
-          const needle = q.toLowerCase();
-          rows = rows.filter((r: Record<string, unknown>) =>
-            JSON.stringify(r).toLowerCase().includes(needle),
-          );
+        const q = url.searchParams.get("q")?.trim() ?? "";
+
+        // Tenant/branch/parent scope + fixed FK filters (child lists), DB-side search.
+        const base = baseWhere(cfg, ctx, fkFilters(cfg, url));
+        const search = searchClause(cfg, q);
+        const where = search ? { AND: [base, search] } : base;
+        const orderBy = cfg.orderBy ?? { createdAt: "desc" };
+        const decrypt = (rows: Record<string, unknown>[]) =>
+          cfg.encryptFields ? rows.map((r) => decryptRow(cfg, r)) : rows;
+
+        // Opt-in pagination: with `page`, return one page + total via X-Total-Count.
+        // Legacy callers (boards, option dropdowns) omit `page` and get a capped array.
+        if (url.searchParams.has("page")) {
+          const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10) || 1);
+          const sizeRaw = parseInt(url.searchParams.get("pageSize") || "25", 10) || 25;
+          const pageSize = Math.min(PAGE_SIZE_MAX, Math.max(1, sizeRaw));
+          const [rows, total] = await Promise.all([
+            model(cfg.delegate).findMany({ where, include: cfg.include, orderBy, skip: (page - 1) * pageSize, take: pageSize }),
+            model(cfg.delegate).count({ where }),
+          ]);
+          return new Response(JSON.stringify(decrypt(rows)), {
+            status: 200,
+            headers: { "Content-Type": "application/json", "X-Total-Count": String(total) },
+          });
         }
-        if (cfg.encryptFields) rows = rows.map((r: Record<string, unknown>) => decryptRow(cfg, r));
-        return json(rows);
+
+        const rows = await model(cfg.delegate).findMany({ where, include: cfg.include, orderBy, take: 500 });
+        return json(decrypt(rows));
       }),
 
     POST: (req: Request) =>

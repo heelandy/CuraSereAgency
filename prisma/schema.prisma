@@ -331,6 +331,9 @@ model User {
   @@index([agencyId])
   @@index([branchId])
   @@index([familyPatientId])
+  // Global email lookups (login, signup, invite) — the composite unique above is
+  // led by agencyId and can't serve an email-only predicate, so index it directly.
+  @@index([email])
 }
 
 model UserSession {

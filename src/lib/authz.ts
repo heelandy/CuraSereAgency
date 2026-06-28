@@ -292,7 +292,10 @@ export async function getOptionalUser(): Promise<Ctx | null> {
   const sid = session?.user?.id;
   if (!sid) return null;
 
-  const user = await prisma.user.findUnique({ where: { id: sid } });
+  const user = await prisma.user.findUnique({
+    where: { id: sid },
+    include: { agency: { select: { verificationStatus: true } } },
+  });
   if (!user || !user.active) return null;
   if (typeof session.user.tokenVersion === "number" && session.user.tokenVersion !== user.tokenVersion) {
     return null;
@@ -311,12 +314,11 @@ export async function getOptionalUser(): Promise<Ctx | null> {
   }
 
   // Authenticity gate: agency users get strict-minimum access until the agency is
-  // VERIFIED. The platform owner is never gated (even while impersonating).
-  let agencyVerified = true;
-  if (user.role !== "PLATFORM_OWNER") {
-    const ag = await prisma.agency.findUnique({ where: { id: agencyId }, select: { verificationStatus: true } });
-    agencyVerified = ag?.verificationStatus === "VERIFIED";
-  }
+  // VERIFIED. The platform owner is never gated (even while impersonating). For a
+  // normal user agencyId === user.agencyId, so the included status is authoritative
+  // (no extra query); only an impersonating platform owner diverges, and they're
+  // always treated as verified.
+  const agencyVerified = user.role === "PLATFORM_OWNER" || user.agency?.verificationStatus === "VERIFIED";
 
   return {
     userId: user.id,

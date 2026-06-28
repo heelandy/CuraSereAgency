@@ -50,6 +50,8 @@ export type CrudConfig = {
 
 type Row = Record<string, any>;
 
+const PAGE_SIZE = 25;
+
 function getPath(obj: Row, path: string): any {
   if (!path) return obj; // accessor:"" → the whole row (e.g. fullName columns)
   return path.split(".").reduce<any>((acc, k) => (acc == null ? acc : acc[k]), obj);
@@ -104,8 +106,11 @@ export function CrudResource(cfg: CrudConfig) {
   const [form, setForm] = useState<Record<string, any>>({});
   const [optionMap, setOptionMap] = useState<Record<string, { value: string; label: string }[]>>({});
   const [saving, setSaving] = useState(false);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
 
   const base = cfg.basePath ?? `/api/r/${cfg.resource}`;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const fields = useMemo(
     () => cfg.fields.filter((f) => !cfg.fixed || !(f.name in cfg.fixed)),
@@ -116,14 +121,15 @@ export function CrudResource(cfg: CrudConfig) {
     setLoading(true);
     setError(null);
     try {
-      const url = `${base}${q ? `?q=${encodeURIComponent(q)}` : ""}`;
-      const res = await fetch(url);
+      // Server-side pagination + search + child-list (fixed FK) filtering.
+      const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+      if (q) params.set("q", q);
+      if (cfg.fixed) for (const [k, v] of Object.entries(cfg.fixed)) params.set(k, v);
+      const res = await fetch(`${base}?${params.toString()}`);
       if (!res.ok) throw new Error("Failed to load");
-      let data: Row[] = await res.json();
-      if (cfg.fixed) {
-        data = data.filter((r) => Object.entries(cfg.fixed!).every(([k, v]) => r[k] === v));
-      }
+      const data: Row[] = await res.json();
       setRows(data);
+      setTotal(Number(res.headers.get("X-Total-Count") ?? data.length));
     } catch (e) {
       setError("Could not load data.");
     } finally {
@@ -134,7 +140,7 @@ export function CrudResource(cfg: CrudConfig) {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
+  }, [q, page]);
 
   async function openModal(row: Row | null) {
     setEditing(row);
@@ -231,7 +237,7 @@ export function CrudResource(cfg: CrudConfig) {
               className="input pl-9"
               placeholder={`Search ${cfg.title.toLowerCase()}…`}
               value={q}
-              onChange={(e) => setQ(e.target.value)}
+              onChange={(e) => { setQ(e.target.value); setPage(1); }}
             />
           </div>
           {cfg.embedded && !cfg.readOnly && (
@@ -239,7 +245,7 @@ export function CrudResource(cfg: CrudConfig) {
               <PlusIcon width={14} /> Add {cfg.singular}
             </button>
           )}
-          <span className="muted whitespace-nowrap">{rows.length} record{rows.length === 1 ? "" : "s"}</span>
+          <span className="muted whitespace-nowrap">{total} record{total === 1 ? "" : "s"}</span>
         </div>
 
         {error && <div className="border-b border-red-100 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</div>}
